@@ -57,6 +57,34 @@ MongoDB 5 o superior exige ARMv8.2-A y la Pi 4 (Cortex-A72, ARMv8.0) no lo tiene
 - Los compose usan `mongosh` o `mongo` según el que traiga la imagen, así que sirven para ambas versiones.
 - `MONGO_CACHE_GB=0.5` y `MONGO_MEM_LIMIT=1500m` en una Pi de 4 GB. Con 8 GB, `1` y `2g`.
 
+## Despliegue rápido en la Pi de pruebas (git pull)
+
+La Pi actual (Pi 4 de 4 GB con SSD) es **temporal y solo para pruebas**. Se entra por SSH con Tailscale y el repo ya
+está clonado en `~/pi/docker/CRM_Celulares`, así que no hace falta el runner ni `provision.sh`.
+
+1. **Túnel** en Cloudflare Zero Trust → Networks → Tunnels → *Create a tunnel* (Cloudflared). Copiar el token.
+   *Public hostname*: `<sub>.coliredes-paloalto.uk` → `http://caddy:80` (y, si se usa, `ingest.coliredes-paloalto.uk` → `http://caddy:80`).
+2. En la Pi, una sola vez:
+   ```bash
+   cd ~/pi/docker/CRM_Celulares
+   cp .env.example .env && nano .env
+   ```
+   Cambiar como mínimo: `TUNNEL_TOKEN`, `MONGO_ROOT_PASSWORD`, `MONGO_APP_PASSWORD`, `JWT_SECRET`, `JWT_REFRESH_SECRET`,
+   `INGEST_SERVICE_TOKEN`, `NODE_ENV=production`, `CORS_ORIGIN=https://<sub>.coliredes-paloalto.uk` y
+   `MONGO_URI=mongodb://crm_api:<MONGO_APP_PASSWORD>@mongo:27017/crm_celulares?replicaSet=rs0&authSource=crm_celulares`.
+   Los valores por defecto de memoria ya son para 4 GB con `mongo:4.4.18`.
+3. Cada vez que haya cambios:
+   ```bash
+   bash infra/scripts/pi-deploy.sh            # git pull + build en la Pi + espera /api/v1/health
+   ```
+   La primera vez crea `infra/secrets/mongo-keyfile` (pide `sudo`). Construir la imagen en la Pi 4 toma unos minutos.
+4. Probar desde la Pi: `curl http://127.0.0.1:8080/api/v1/health`. Desde fuera: `https://<sub>.coliredes-paloalto.uk/api/v1/health`.
+5. Ver logs: `docker compose -f infra/docker-compose.yml -f infra/docker-compose.prod.yml --env-file .env logs -f api`.
+
+Respaldo opcional: `APP_DIR=$PWD bash infra/scripts/backup.sh` deja el dump en `backups/`.
+
+Lo que sigue en este documento (runner, staging, `provision.sh`, cron, Access y WAF) es para cuando haya un servidor definitivo.
+
 ## Puesta en marcha (una sola vez)
 
 1. **Sistema:** grabar el SO en el SSD, habilitar SSH con tu llave y arrancar.

@@ -4,7 +4,8 @@
 #   Generar el keyFile una vez en el servidor (lo hace scripts/provision.sh):
 #     openssl rand -base64 756 > infra/secrets/mongo-keyfile && chmod 400 infra/secrets/mongo-keyfile
 #     sudo chown 999:999 infra/secrets/mongo-keyfile
-# - api y worker usan las imágenes publicadas en GHCR (IMAGE_TAG la fija el deploy).
+# - api y worker: con infra/scripts/pi-deploy.sh (git pull) la imagen se construye en la Pi;
+#   con el workflow deploy.yml se baja de GHCR (IMAGE_TAG la fija deploy.sh).
 services:
   mongo:
     # Raspberry Pi 4: MONGO_IMAGE=mongo:4.4.18 (lo más nuevo que corre sin ARMv8.2-A).
@@ -52,8 +53,7 @@ services:
           print('mongo-init listo')"
 
   api:
-    image: ghcr.io/mauriggh/crm-celulares-backend:${IMAGE_TAG:-latest}
-    build: !reset null
+    image: ghcr.io/mauriggh/crm-celulares-backend:${IMAGE_TAG:-local}
     environment:
       NODE_ENV: production
       MEDIA_DIR: /app/media
@@ -63,8 +63,7 @@ services:
     logging: *logging
 
   worker:
-    image: ghcr.io/mauriggh/crm-celulares-backend:${IMAGE_TAG:-latest}
-    build: !reset null
+    image: ghcr.io/mauriggh/crm-celulares-backend:${IMAGE_TAG:-local}
     environment:
       NODE_ENV: production
       MEDIA_DIR: /app/media
