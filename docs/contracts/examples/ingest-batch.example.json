@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "source": "tienda_competidor_a",
+  "scraped_at": "2026-10-20T18:00:00Z",
+  "records": [
+    {
+      "external_id": "a-123456",
+      "source_url": "https://ejemplo.com/galaxy-s25-256-negro",
+      "brand": "Samsung",
+      "model": "Galaxy S25",
+      "storage_gb": 256,
+      "ram_gb": 12,
+      "color": "Negro",
+      "condition": "nuevo",
+      "price": "18999.00",
+      "currency": "MXN",
+      "in_stock": true,
+      "gtin": null,
+      "specs": { "pantalla_pulgadas": 6.2, "bateria_mah": 4000, "red": "5G" },
+      "images": ["https://ejemplo.com/img/s25.jpg"]
+    },
+    {
+      "external_id": "a-789012",
+      "source_url": "https://ejemplo.com/iphone-16-128-azul",
+      "brand": "Apple",
+      "model": "iPhone 16",
+      "storage_gb": 128,
+      "ram_gb": null,
+      "color": "Azul",
+      "condition": "nuevo",
+      "price": "17499.00",
+      "currency": "MXN",
+      "in_stock": false,
+      "gtin": "0195949000000",
+      "specs": { "pantalla_pulgadas": 6.1 },
+      "images": []
+    }
+  ]
+}

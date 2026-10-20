@@ -1,0 +1,63 @@
+# Override para staging y producción (en nuestro VPS):
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.prod.yml --env-file .env up -d
+# - MongoDB con autenticación y keyFile (requerido por replica set + auth).
+#   Generar el keyFile una vez en el servidor (lo hace scripts/provision.sh):
+#     openssl rand -base64 756 > infra/secrets/mongo-keyfile && chmod 400 infra/secrets/mongo-keyfile
+#     sudo chown 999:999 infra/secrets/mongo-keyfile
+# - api y worker usan las imágenes publicadas en GHCR (IMAGE_TAG la fija el deploy).
+services:
+  mongo:
+    command: ["--replSet", "rs0", "--bind_ip_all", "--auth", "--keyFile", "/etc/mongo/keyfile", "--wiredTigerCacheSizeGB", "1"]
+    ports: !reset []
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+    volumes:
+      - mongo-data:/data/db
+      - ./secrets/mongo-keyfile:/etc/mongo/keyfile:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "-u", "${MONGO_ROOT_USER}", "-p", "${MONGO_ROOT_PASSWORD}", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping').ok"]
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  mongo-init:
+    # Inicia el replica set y crea el usuario de la aplicación (idempotente).
+    entrypoint: !override
+      - mongosh
+      - --host
+      - mongo:27017
+      - -u
+      - ${MONGO_ROOT_USER}
+      - -p
+      - ${MONGO_ROOT_PASSWORD}
+      - --authenticationDatabase
+      - admin
+      - --quiet
+      - --eval
+      - >-
+        try { rs.status() } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }); sleep(3000) }
+        const app = db.getSiblingDB('crm_celulares');
+        if (!app.getUser('${MONGO_APP_USER}')) {
+          app.createUser({ user: '${MONGO_APP_USER}', pwd: '${MONGO_APP_PASSWORD}', roles: [{ role: 'readWrite', db: 'crm_celulares' }] })
+        }
+
+  api:
+    image: ghcr.io/mauriggh/crm-celulares-backend:${IMAGE_TAG:-latest}
+    build: !reset null
+    environment:
+      NODE_ENV: production
+    logging: *logging
+
+  worker:
+    image: ghcr.io/mauriggh/crm-celulares-backend:${IMAGE_TAG:-latest}
+    build: !reset null
+    environment:
+      NODE_ENV: production
+    logging: *logging
+
+  redis:
+    logging: *logging
+
+  caddy:
+    logging: *logging

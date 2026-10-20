@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validar docker-compose
+        run: |
+          cp .env.example .env
+          mkdir -p infra/secrets && touch infra/secrets/mongo-keyfile
+          docker compose -f infra/docker-compose.yml --env-file .env config -q
+          docker compose -f infra/docker-compose.yml -f infra/docker-compose.prod.yml --env-file .env config -q

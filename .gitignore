@@ -1,0 +1,27 @@
+# Dependencias
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+
+# Builds
+dist/
+build/
+*.egg-info/
+
+# Entorno (nunca subir secretos)
+.env
+.env.local
+.env.*.local
+
+# Logs y datos locales
+*.log
+.pytest_cache/
+coverage/
+infra/data/
+infra/secrets/
+
+# Sistema y editores
+.DS_Store
+.vscode/
+.idea/
