@@ -30,6 +30,7 @@ Código de referencia: https://github.com/MauriGGH/mochi-matcha-react (backend E
 | B11 Reportes, auditoría y configuración | Miembro, paquete C | F3 | Pendiente |
 | B12 Ingesta del scraping | Este proyecto | F3 | Recepción hecha en PR #1 |
 | B13 Seguridad y observabilidad | Este proyecto | F3 | Pendiente |
+| B15 API de exportación para sistemas externos | Este proyecto (hilo Backend) | F3 | Pendiente |
 | B14 Pruebas | Infraestructura de tests: este proyecto. Tests de cada módulo: su dueño | Continuo | Base hecha en PR #1 |
 | S1 a S11 Servidor | m con Claude | F1 a F3 | Ver sección 4 |
 
@@ -111,6 +112,19 @@ Regla para todos: rama `feature/back-<modulo>` desde `develop`, PR con CI verde 
 - Entregar al equipo de scraping el token de servicio y la URL pública protegida (ver S6).
 - **Regla:** la ingesta nunca cambia precios de venta ni publica productos sola.
 - **Terminado cuando:** con el lote de ejemplo un registro coincide y otro queda como `nuevo`.
+
+#### B15. API de exportación para sistemas externos (F3)
+- **Archivos:** `src/modules/external/`, contrato propio en `docs/external-api.yaml`.
+- Clientes: colección `api_clients` (nombre, hash de la llave, scopes, límite por minuto, vence_en, activo) y CRUD `/admin/api-clients` (gerente). La llave se muestra una sola vez; revocar y rotar.
+- Autenticación por `X-API-Key`; scopes `catalog:read`, `stock:read`, `prices:read`, `sales:read`.
+- Endpoints: `GET /external/v1/products?updated_since=&cursor=&limit=`, `GET /external/v1/products/:sku`, `GET /external/v1/stock?updated_since=`, `GET /external/v1/prices/history?sku=&from=&to=`, `GET /external/v1/reports/sales?group_by=day|brand|sku&from=&to=`.
+- Exportación masiva asíncrona: `POST /external/v1/exports` (`resource`, `format` json, csv o xlsx, `filters`) → `202 { export_id }`; el worker genera el archivo; `GET /external/v1/exports/:id` da estado y enlace firmado que vence en 24 h.
+- Paginación por cursor y sincronización incremental por `updated_at` (índices en `products.updated_at` y `stock_levels.updated_at`). CSV con `Accept: text/csv` o `?format=csv`.
+- Sin datos personales de clientes: los pedidos solo salen agregados.
+- Rate limit por llave en Redis (60/min por defecto) con encabezados `RateLimit-*`; cada llamada se registra en `api_access_logs`.
+- **Servidor (S6):** hostname `api.<dominio>` en el túnel de Cloudflare que solo enruta `/external/*`, con regla de rate limit en Cloudflare.
+- **Terminado cuando:** tests de llave inválida (401), scope faltante (403), límite excedido (429), paginación por cursor sin huecos ni repetidos, y una exportación CSV que se descarga con el enlace firmado.
+- **Depende de:** B6, B7, B11.
 
 #### B13. Seguridad y observabilidad (F3)
 - Revisión de validación de entrada en todos los endpoints de los paquetes; rate limit en Redis para endpoints sensibles.
@@ -212,6 +226,7 @@ Cómo se reparte el trabajo: Claude escribe en el repo los archivos (compose, Ca
 - Crear un túnel en Cloudflare Zero Trust y correr `cloudflared` como servicio de Compose con su token (sin abrir puertos del router).
 - Hostnames públicos: `<dominio>` y `www` → `http://caddy:80` (prod); `staging.<dominio>` → caddy de staging; `ssh.<dominio>` → `ssh://localhost:22` protegido con Cloudflare Access (solo correos del equipo).
 - SSL/TLS en modo Full; regla de WAF que bloquee `/internal/*` en todos los hostnames.
+- Para sistemas externos (B15): `api.<dominio>` → caddy, solo `/external/*`, con regla de rate limit en Cloudflare.
 - Para el equipo de scraping: `ingest.<dominio>` → `/internal/v1/ingest` protegido con un Service Token de Cloudflare Access además del token de la API.
 - **Claude:** compose y documentación; crear rutas y DNS con el conector de Cloudflare cuando conecte. **m:** crear el túnel y copiar el token a la Pi (`.env`).
 
@@ -244,6 +259,7 @@ Cómo se reparte el trabajo: Claude escribe en el repo los archivos (compose, Ca
 | --- | --- | --- | --- |
 | Base de datos | MongoDB en la Pi, acceso por SSH con Cloudflare Access, modelo propuesto | `docs/data-model.md` | Validación del modelo, índices y consultas |
 | Scraping y limpieza | Contrato del lote, token de la API, Service Token de Cloudflare, URL `ingest.<dominio>` | `docs/contracts/ingest-batch.schema.json` | Lotes limpios con `Idempotency-Key` |
+| Sistemas externos | Llave de API con scopes, contrato `docs/external-api.yaml`, `api.<dominio>` | `/external/v1` | Consultas y exportaciones dentro de su límite |
 | Frontend | Contrato de la API, `staging.<dominio>`, usuarios de prueba | `docs/openapi.yaml`, `/api/v1/docs` | Build estático que sirve Caddy |
 
 ## 6. Preguntas abiertas
