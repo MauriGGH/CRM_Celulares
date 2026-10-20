@@ -1,7 +1,7 @@
 # Modelo de datos (MongoDB)
 
 Propuesta del backend para acordar con el equipo de base de datos (MongoDB corre en nuestro VPS): colecciones, campos e índices que el backend
-necesita en la base `crm_celulares`. Requisito: MongoDB 7 o superior en **replica set** (transacciones).
+necesita en la base `crm_celulares`. Requisito: MongoDB 4.4 o superior en **replica set** (transacciones). La Pi 4 del proyecto corre 4.4.18, así que no se usan colecciones time series.
 Si el equipo de scraping usa MongoDB para sus datos crudos, debe ser otra base; el backend no la lee.
 
 Convenciones: campos en `snake_case`; `created_at` y `updated_at` con `timestamps` de Mongoose; montos en
@@ -29,7 +29,7 @@ se referencia lo que tiene vida propia o crece.
 | `settings` | clave, valor | clave único | |
 | `ingest_batches` | source, schema_version, scraped_at, idempotency_key, status, record_count, records (hasta procesarse), stats | idempotency_key único, status | Ya implementada en `backend/src/modules/ingest` |
 | `ingest_records` | batch_id, source, external_id, source_url, payload, resultado (`coincide`, `nuevo`, `conflicto`, `invalido`), product_id, sku, decision (`pendiente`, `aprobado`, `rechazado`), revisado_por | (resultado, decision), (source, external_id) | Cola de revisión del gerente |
-| `competitor_prices` | **colección time series**: timeField `captured_at`, metaField `{ sku, source }`, precio, en_stock | automático por meta y tiempo | Histórico de precios de la competencia, solo lectura para ventas |
+| `competitor_prices` | sku, source, precio, en_stock, captured_at | (sku, captured_at), (source, captured_at) | Histórico de precios de la competencia, solo lectura para ventas |
 
 ### Transacciones
 
