@@ -203,7 +203,7 @@ Cómo se reparte el trabajo: Claude escribe en el repo los archivos (compose, Ca
 - **Claude:** archivos. **m:** primer `docker compose up` en la Pi.
 
 #### S5. MongoDB en la Pi (F1)
-- **Pi 5:** `mongo:8.0` arm64. **Pi 4:** solo hasta `mongo:4.4.18` (MongoDB 5+ exige ARMv8.2, que la Pi 4 no tiene); en ese caso `competitor_prices` es colección normal en lugar de time series. Las transacciones funcionan en ambos casos.
+- **La Pi del proyecto es una Pi 4 → `mongo:4.4.18`** (aplicado en el PR #2). Si algún día se cambia a Pi 5: `mongo:8.0` arm64. En Pi 4 solo hasta `mongo:4.4.18` (MongoDB 5+ exige ARMv8.2, que la Pi 4 no tiene); en ese caso `competitor_prices` es colección normal en lugar de time series. Las transacciones funcionan en ambos casos.
 - Replica set `rs0` de un nodo, `--auth`, keyFile, `wiredTigerCacheSizeGB` de 1 (Pi de 8 GB) o 0.5 (4 GB). Usuario `crm_api` solo con `readWrite` en su base.
 - El equipo de base de datos entra por SSH a través de Cloudflare Access (S6), nunca con Mongo expuesto.
 - **Terminado cuando:** la API ejecuta una transacción de prueba en la Pi.
@@ -247,7 +247,7 @@ Cómo se reparte el trabajo: Claude escribe en el repo los archivos (compose, Ca
 | Frontend | Contrato de la API, `staging.<dominio>`, usuarios de prueba | `docs/openapi.yaml`, `/api/v1/docs` | Build estático que sirve Caddy |
 
 ## 6. Preguntas abiertas
-- ¿Qué modelo de Raspberry Pi es y cuánta RAM tiene? Define la versión de MongoDB (S5).
+- Resuelto: la Pi es una Pi 4, así que MongoDB 4.4.18 (sin colecciones time series). Falta confirmar la RAM para fijar `wiredTigerCacheSizeGB`.
 - ¿Cuántas personas hay en el equipo de backend además de ti? Con menos de tres, los paquetes se combinan (A+C y B).
 - ¿Imágenes de productos en el SSD de la Pi o en Cloudflare R2? Por defecto, en la Pi.
 - ¿El equipo de DB diseña el modelo o solo lo valida? Por ahora el backend propone y DB valida.
