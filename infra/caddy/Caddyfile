@@ -40,6 +40,14 @@
 		respond 403
 	}
 
+	# API de exportación para fuentes externas (la implementa backend con API key).
+	# flush_interval -1: las descargas CSV/JSON grandes salen en streaming sin búfer.
+	handle /api/v1/export/* {
+		reverse_proxy api:3001 {
+			flush_interval -1
+		}
+	}
+
 	handle /api/* {
 		reverse_proxy api:3001
 	}
