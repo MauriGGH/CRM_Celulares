@@ -1,6 +1,6 @@
 # scraper/
 
-Servicio Python 3.12 de scraping y limpieza de datos (equipo de datos, tareas D1–D10).
+Servicio Python 3.12 de scraping y limpieza de datos. **Lo implementa el equipo de datos (tareas D1–D10); esta carpeta es solo el punto de integración que deja infra.** No hay código aquí todavía.
 
 Infra ya deja listo:
 

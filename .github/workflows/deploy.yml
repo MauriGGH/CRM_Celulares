@@ -58,6 +58,7 @@ jobs:
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
       - name: web
+        if: hashFiles('frontend/package.json') != ''
         uses: docker/build-push-action@v6
         with:
           context: .

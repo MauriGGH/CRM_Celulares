@@ -57,6 +57,8 @@ jobs:
   frontend:
     name: Frontend (lint + tests + build)
     runs-on: ubuntu-latest
+    # El frontend lo desarrolla otro equipo; el job se activa cuando suba frontend/package.json.
+    if: hashFiles('frontend/package.json') != ''
     defaults:
       run:
         working-directory: frontend
@@ -106,6 +108,7 @@ jobs:
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
       - name: Build web
+        if: hashFiles('frontend/package.json') != ''
         uses: docker/build-push-action@v6
         with:
           context: .

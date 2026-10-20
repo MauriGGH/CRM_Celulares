@@ -128,6 +128,11 @@ Las imágenes de productos viven en el bucket S3 (R2/Spaces), con versionado act
 
 ## Contrato con los otros equipos
 
+El scraping/limpieza de datos y el frontend los desarrollan otros equipos en sus carpetas.
+Infra solo deja preparada la integración: Dockerfile o imagen, servicio en compose,
+variables y jobs de CI que se activan solos cuando aparece `scraper/requirements.txt`
+o `frontend/package.json`. Mientras tanto, `web` no se construye y `scraper` queda en su perfil.
+
 - **Backend:** escucha en `PORT=3001`, expone `GET /health` (200 si Mongo y Redis responden),
   lee `MONGO_URI` y `REDIS_URL`, define `npm run migrate` (índices) y `src/worker.js` para BullMQ.
   Las rutas internas viven bajo `/internal/v1/*` y exigen `INGEST_API_KEY`.
