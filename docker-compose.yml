@@ -1,0 +1,138 @@
+# Entorno local completo. Uso:
+#   cp .env.example .env
+#   docker compose up -d                       # mongo, redis, api
+#   docker compose --profile worker up -d      # + worker BullMQ (cuando exista src/worker.js)
+#   docker compose --profile scraper up -d     # + scraper Python (cuando exista scraper/requirements.txt)
+#   docker compose --profile web up -d         # + Caddy sirviendo el frontend compilado en http://localhost:8080
+# Para desarrollo con recarga en caliente: levantar solo mongo y redis y
+# correr `npm run dev` en backend/ y frontend/ desde el host (ver infra/README.md).
+name: pos-celulares
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-api-env: &api-env
+  NODE_ENV: ${NODE_ENV:-development}
+  PORT: 3001
+  MONGO_URI: mongodb://${APP_DB_USER}:${APP_DB_PASSWORD}@mongo:27017/${APP_DB_NAME}?authSource=${APP_DB_NAME}&replicaSet=rs0
+  REDIS_URL: redis://redis:6379
+  JWT_SECRET: ${JWT_SECRET}
+  JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+  CORS_ORIGIN: ${CORS_ORIGIN}
+  INGEST_API_KEY: ${INGEST_API_KEY}
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  S3_ENDPOINT: ${S3_ENDPOINT:-}
+  S3_REGION: ${S3_REGION:-auto}
+  S3_BUCKET: ${S3_BUCKET:-}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+  S3_PUBLIC_URL: ${S3_PUBLIC_URL:-}
+  PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
+  PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
+  PAYPAL_MODE: ${PAYPAL_MODE:-sandbox}
+  MP_ACCESS_TOKEN: ${MP_ACCESS_TOKEN:-}
+  MP_WEBHOOK_SECRET: ${MP_WEBHOOK_SECRET:-}
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/opt/mongo/entrypoint.sh"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_REPLICA_KEY: ${MONGO_REPLICA_KEY}
+      APP_DB_NAME: ${APP_DB_NAME}
+      APP_DB_USER: ${APP_DB_USER}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      SCRAPER_DB_NAME: ${SCRAPER_DB_NAME}
+      SCRAPER_DB_USER: ${SCRAPER_DB_USER}
+      SCRAPER_DB_PASSWORD: ${SCRAPER_DB_PASSWORD}
+    volumes:
+      - mongodata:/data/db
+      - ./infra/mongo/init:/docker-entrypoint-initdb.d:ro
+      - ./infra/mongo/entrypoint.sh:/opt/mongo/entrypoint.sh:ro
+      - ./infra/mongo/healthcheck.sh:/opt/mongo/healthcheck.sh:ro
+    ports:
+      - "127.0.0.1:27017:27017"
+    healthcheck:
+      test: ["CMD", "bash", "/opt/mongo/healthcheck.sh"]
+      interval: 10s
+      timeout: 10s
+      start_period: 30s
+      retries: 20
+    logging: *logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *logging
+
+  api:
+    init: true
+    build: ./backend
+    restart: unless-stopped
+    environment: *api-env
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    ports:
+      - "127.0.0.1:3001:3001"
+    logging: *logging
+
+  worker:
+    init: true
+    build: ./backend
+    profiles: ["worker"]
+    restart: unless-stopped
+    command: ["node", "src/worker.js"]
+    environment: *api-env
+    healthcheck:
+      disable: true
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    logging: *logging
+
+  scraper:
+    build: ./scraper
+    profiles: ["scraper"]
+    restart: "no"
+    environment:
+      SCRAPER_MONGO_URI: mongodb://${SCRAPER_DB_USER}:${SCRAPER_DB_PASSWORD}@mongo:27017/${SCRAPER_DB_NAME}?authSource=${SCRAPER_DB_NAME}&replicaSet=rs0
+      INGEST_URL: http://api:3001/internal/v1/ingest/batches
+      INGEST_API_KEY: ${INGEST_API_KEY}
+      SENTRY_DSN: ${SCRAPER_SENTRY_DSN:-}
+    depends_on:
+      mongo: { condition: service_healthy }
+    logging: *logging
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/caddy/Dockerfile
+    profiles: ["web"]
+    environment:
+      SITE_ADDRESS: ":80"
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on: [api]
+    logging: *logging
+
+volumes:
+  mongodata:
+  redisdata:

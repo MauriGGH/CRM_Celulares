@@ -1,0 +1,122 @@
+# CI en cada PR y push a main/develop (S7): lint, tests y build de cada parte.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (lint + tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      # Mongo standalone para tests de integración. Los tests que usen
+      # transacciones deben levantar su propio replica set (mongodb-memory-server).
+      mongo:
+        image: mongo:7
+        ports: ["27017:27017"]
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok'"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 3s --health-retries 20
+    env:
+      NODE_ENV: test
+      MONGO_URI: mongodb://localhost:27017/pos_test
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci_jwt_secret
+      JWT_REFRESH_SECRET: ci_jwt_refresh_secret
+      INGEST_API_KEY: ci_ingest_key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run lint --if-present
+      - run: npm run migrate --if-present
+      - run: npm test
+
+  frontend:
+    name: Frontend (lint + tests + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint --if-present
+      - run: npm test --if-present
+      - run: npm run build
+
+  scraper:
+    name: Scraper (lint + pytest)
+    runs-on: ubuntu-latest
+    # El job se activa solo cuando el equipo de datos sube requirements.txt (D3).
+    if: hashFiles('scraper/requirements.txt') != ''
+    defaults:
+      run:
+        working-directory: scraper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scraper/requirements*.txt
+      - run: pip install -r requirements.txt
+      - run: if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+      - run: if command -v ruff >/dev/null; then ruff check .; fi
+      - run: pytest -q
+
+  docker:
+    name: Docker build (sin push)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build api
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: false
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+      - name: Build web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/caddy/Dockerfile
+          push: false
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+      - name: Validar Caddyfile y compose
+        run: |
+          docker run --rm -v "$PWD/infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -e SITE_ADDRESS=example.com caddy:2.8-alpine caddy validate --config /etc/caddy/Caddyfile
+          cp .env.example .env
+          docker compose config -q
+          docker compose -f infra/docker-compose.prod.yml --env-file .env config -q

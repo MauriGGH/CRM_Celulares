@@ -1,0 +1,50 @@
+# Caddy: HTTPS automático (Let's Encrypt), SPA del frontend y proxy a la API.
+# SITE_ADDRESS = dominio real en staging/producción (p. ej. tienda.ejemplo.mx);
+# ":80" en local, sin certificado.
+{
+	email {$ACME_EMAIL:admin@example.com}
+}
+
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	log {
+		output stdout
+		format json
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# Las rutas internas (ingesta del scraper) solo se usan dentro de la red de
+	# Docker (http://api:3001/internal/...). Desde internet no existen.
+	# Va primero: los bloques handle son excluyentes y este debe ganar.
+	@internal path /internal /internal/* /api/internal/* /api/v1/internal/*
+	handle @internal {
+		respond 404
+	}
+
+	handle /api/* {
+		reverse_proxy api:3001
+	}
+
+	handle /media/* {
+		reverse_proxy api:3001
+	}
+
+	handle /health {
+		reverse_proxy api:3001
+	}
+
+	# SPA: cualquier otra ruta cae en index.html para que React Router la resuelva.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
