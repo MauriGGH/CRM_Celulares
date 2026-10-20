@@ -28,7 +28,27 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validar docker-compose
         run: |
-          cp .env.example .env
+          cp .env.example .env && echo "TUNNEL_TOKEN=ci" >> .env
           mkdir -p infra/secrets && touch infra/secrets/mongo-keyfile
           docker compose -f infra/docker-compose.yml --env-file .env config -q
           docker compose -f infra/docker-compose.yml -f infra/docker-compose.prod.yml --env-file .env config -q
+      - name: Validar Caddyfile
+        run: |
+          docker run --rm -v "$PWD/infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -e DOMAIN=example.com caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+      - name: Revisar scripts de infra
+        run: shellcheck -S warning infra/scripts/*.sh
+
+  image:
+    name: Build de la imagen del backend (sin push)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: false
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend

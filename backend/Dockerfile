@@ -12,6 +12,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY backend/package.json ./
 COPY backend/src ./src
 COPY docs/contracts /app/docs/contracts
+# Volumen de imágenes de productos (media-data en producción), escribible por node.
+RUN mkdir -p /app/media && chown node:node /app/media
 USER node
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://localhost:3001/api/v1/health || exit 1

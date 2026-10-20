@@ -1,7 +1,18 @@
-# DOMAIN=localhost en local (certificado interno); en el VPS, el dominio real
-# (Caddy obtiene el certificado HTTPS automáticamente).
+# DOMAIN=localhost en local (certificado interno). En la Raspberry Pi DOMAIN=":80":
+# Caddy escucha HTTP plano detrás de Cloudflare Tunnel, que pone el HTTPS.
+# INGEST_HOST (p. ej. ingest.<dominio>) es el único hostname por el que se acepta
+# /internal/v1/ingest/*; Cloudflare Access lo protege con un Service Token.
+{
+	email {$ACME_EMAIL:admin@example.com}
+}
+
 {$DOMAIN} {
 	encode zstd gzip
+
+	log {
+		output stdout
+		format json
+	}
 
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -11,12 +22,32 @@
 		-Server
 	}
 
-	# La API interna (ingesta del scraping) nunca se expone a Internet.
-	@internal path /internal/*
-	respond @internal 403
+	# Hostname de ingesta: solo expone el endpoint del scraping, nada más.
+	@ingest_host host {$INGEST_HOST:ingest.invalid}
+	handle @ingest_host {
+		@ingest path /internal/v1/ingest/*
+		handle @ingest {
+			reverse_proxy api:3001
+		}
+		respond 404
+	}
+
+	# En cualquier otro hostname la API interna no existe hacia Internet.
+	# Tiene que ser un bloque handle y estar antes que los demás: un "respond"
+	# suelto pierde contra el handle del frontend y /internal/* acabaría sirviendo index.html.
+	@internal path /internal /internal/* /api/internal/* /api/v1/internal/*
+	handle @internal {
+		respond 403
+	}
 
 	handle /api/* {
 		reverse_proxy api:3001
+	}
+
+	# Imágenes de productos (volumen media-data en la Pi)
+	handle_path /media/* {
+		root * /srv/media
+		file_server
 	}
 
 	# Frontend compilado (lo entrega el equipo de frontend en frontend/dist)
