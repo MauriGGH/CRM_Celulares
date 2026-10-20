@@ -1,0 +1,152 @@
+# Staging y producción en el VPS. Las imágenes se construyen en GitHub Actions
+# y se publican en GHCR; aquí solo se descargan. Uso en el servidor:
+#   cd /opt/pos && docker compose -f docker-compose.prod.yml --env-file .env up -d
+# IMAGE_TAG lo fija el workflow de deploy (sha del commit o tag v*).
+name: pos-celulares
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-api-env: &api-env
+  NODE_ENV: production
+  PORT: 3001
+  MONGO_URI: mongodb://${APP_DB_USER}:${APP_DB_PASSWORD}@mongo:27017/${APP_DB_NAME}?authSource=${APP_DB_NAME}&replicaSet=rs0
+  REDIS_URL: redis://redis:6379
+  JWT_SECRET: ${JWT_SECRET}
+  JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+  CORS_ORIGIN: https://${SITE_ADDRESS}
+  INGEST_API_KEY: ${INGEST_API_KEY}
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  SENTRY_ENVIRONMENT: ${DEPLOY_ENV:-production}
+  S3_ENDPOINT: ${S3_ENDPOINT}
+  S3_REGION: ${S3_REGION:-auto}
+  S3_BUCKET: ${S3_BUCKET}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+  S3_PUBLIC_URL: ${S3_PUBLIC_URL:-}
+  PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
+  PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
+  PAYPAL_MODE: ${PAYPAL_MODE:-live}
+  MP_ACCESS_TOKEN: ${MP_ACCESS_TOKEN:-}
+  MP_WEBHOOK_SECRET: ${MP_WEBHOOK_SECRET:-}
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/opt/mongo/entrypoint.sh"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_REPLICA_KEY: ${MONGO_REPLICA_KEY}
+      APP_DB_NAME: ${APP_DB_NAME}
+      APP_DB_USER: ${APP_DB_USER}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      SCRAPER_DB_NAME: ${SCRAPER_DB_NAME}
+      SCRAPER_DB_USER: ${SCRAPER_DB_USER}
+      SCRAPER_DB_PASSWORD: ${SCRAPER_DB_PASSWORD}
+    volumes:
+      - mongodata:/data/db
+      - ./mongo/init:/docker-entrypoint-initdb.d:ro
+      - ./mongo/entrypoint.sh:/opt/mongo/entrypoint.sh:ro
+      - ./mongo/healthcheck.sh:/opt/mongo/healthcheck.sh:ro
+    # Solo loopback: el equipo de DB administra por túnel SSH
+    # (ssh -L 27017:127.0.0.1:27017 deploy@servidor). Nunca abrir 27017 a internet.
+    ports:
+      - "127.0.0.1:27017:27017"
+    healthcheck:
+      test: ["CMD", "bash", "/opt/mongo/healthcheck.sh"]
+      interval: 10s
+      timeout: 10s
+      start_period: 30s
+      retries: 20
+    logging: *logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+
+  api:
+    init: true
+    image: ${IMAGE_PREFIX}-api:${IMAGE_TAG}
+    restart: unless-stopped
+    environment: *api-env
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    logging: *logging
+
+  worker:
+    init: true
+    image: ${IMAGE_PREFIX}-api:${IMAGE_TAG}
+    profiles: ["worker"]
+    restart: unless-stopped
+    command: ["node", "src/worker.js"]
+    environment: *api-env
+    healthcheck:
+      disable: true
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    logging: *logging
+
+  scraper:
+    image: ${IMAGE_PREFIX}-scraper:${IMAGE_TAG}
+    profiles: ["scraper"]
+    restart: "no"
+    environment:
+      SCRAPER_MONGO_URI: mongodb://${SCRAPER_DB_USER}:${SCRAPER_DB_PASSWORD}@mongo:27017/${SCRAPER_DB_NAME}?authSource=${SCRAPER_DB_NAME}&replicaSet=rs0
+      INGEST_URL: http://api:3001/internal/v1/ingest/batches
+      INGEST_API_KEY: ${INGEST_API_KEY}
+      SENTRY_DSN: ${SCRAPER_SENTRY_DSN:-}
+    depends_on:
+      mongo: { condition: service_healthy }
+    logging: *logging
+
+  web:
+    image: ${IMAGE_PREFIX}-web:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS}
+      ACME_EMAIL: ${ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api]
+    logging: *logging
+
+  # Monitoreo externo de /api/v1/health y alertas. Solo escucha en localhost:
+  # se entra con un túnel SSH (ssh -L 3002:localhost:3002 deploy@servidor).
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    volumes:
+      - kuma:/app/data
+    ports:
+      - "127.0.0.1:3002:3001"
+    logging: *logging
+
+volumes:
+  mongodata:
+  redisdata:
+  caddy_data:
+  caddy_config:
+  kuma:

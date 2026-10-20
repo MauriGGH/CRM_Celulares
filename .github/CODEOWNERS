@@ -1,0 +1,13 @@
+# Revisores obligatorios por carpeta. Reemplazar @MauriGGH por el usuario o
+# equipo de GitHub responsable de cada área cuando estén definidos
+# (p. ej. @org/backend). Un PR que toque la carpeta pide su revisión.
+*               @MauriGGH
+/backend/       @MauriGGH
+/infra/         @MauriGGH
+/.github/       @MauriGGH
+/docs/          @MauriGGH
+/frontend/      @MauriGGH
+/scraper/       @MauriGGH
+# Contratos entre equipos: los aprueban ambas partes.
+/docs/openapi.yaml       @MauriGGH
+/docs/contracts/         @MauriGGH
