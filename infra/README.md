@@ -198,17 +198,16 @@ misma retención. Si se pierde la Pi, la copia en R2 es lo único que queda, as�
 
 `MONGO_INITDB_*` solo se aplica al crear el volumen. Después, cambiar `.env` no cambia la contraseña dentro de Mongo.
 
-## API de exportación para fuentes externas
+## API de exportación para sistemas externos
 
-Backend expone `/api/v1/export/*` (autenticado con API key por cliente). Infra lo publica así:
+Backend expone `/external/v1/*` (tarea B15, autenticado con API key por cliente). Infra lo publica así:
 
-- Mismo hostname del túnel (`crm-celulares.coliredes-paloalto.uk`), sin ruta extra en Cloudflare: Caddy ya
-  enruta `/api/*`, y `/api/v1/export/*` va en streaming (`flush_interval -1`) para descargas grandes.
+- Hostname propio en el túnel: `api-crm.coliredes-paloalto.uk` → `http://caddy:80` (un solo nivel, sin certificado de pago), con `EXTERNAL_HOST=api-crm.coliredes-paloalto.uk`
+  en `.env`. En ese host Caddy solo deja pasar `/external/*`; todo lo demás da 404. También responde en el host principal.
+  Las respuestas van en streaming (`flush_interval -1`) para descargas grandes.
 - **Rate limit en el borde** (Cloudflare → Security → WAF → *Rate limiting rules*; el plan gratis permite una regla):
-  si `http.request.uri.path` empieza con `/api/v1/export`, entonces 60 peticiones por minuto por IP y acción *Block* durante 1 minuto.
+  si `starts_with(http.request.uri.path, "/external/")`, 60 peticiones por minuto por IP, acción *Block* durante 1 minuto.
   El backend aplica además su propio límite por API key.
-- Si un cliente externo necesita lista de IPs o un host aparte, se agrega un hostname de un nivel (p. ej. `api-crm.coliredes-paloalto.uk`)
-  al mismo túnel hacia `http://caddy:80`. No usar subdominios de dos niveles, porque piden Advanced Certificate Manager.
 
 ## Integración con otros equipos
 

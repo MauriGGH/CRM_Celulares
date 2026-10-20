@@ -2,6 +2,7 @@
 # Caddy escucha HTTP plano detrás de Cloudflare Tunnel, que pone el HTTPS.
 # INGEST_HOST (p. ej. ingest.<dominio>) es el único hostname por el que se acepta
 # /internal/v1/ingest/*; Cloudflare Access lo protege con un Service Token.
+# EXTERNAL_HOST (p. ej. api.<dominio>) solo expone /external/* (API de exportación).
 {
 	email {$ACME_EMAIL:admin@example.com}
 }
@@ -22,6 +23,18 @@
 		-Server
 	}
 
+	# Hostname de la API externa: solo /external/*, nada más.
+	@external_host host {$EXTERNAL_HOST:external.invalid}
+	handle @external_host {
+		@external path /external/*
+		handle @external {
+			reverse_proxy api:3001 {
+				flush_interval -1
+			}
+		}
+		respond 404
+	}
+
 	# Hostname de ingesta: solo expone el endpoint del scraping, nada más.
 	@ingest_host host {$INGEST_HOST:ingest.invalid}
 	handle @ingest_host {
@@ -40,9 +53,10 @@
 		respond 403
 	}
 
-	# API de exportación para fuentes externas (la implementa backend con API key).
-	# flush_interval -1: las descargas CSV/JSON grandes salen en streaming sin búfer.
-	handle /api/v1/export/* {
+	# API de exportación para sistemas externos (B15, /external/v1, con API key).
+	# Se sirve en el host principal y en EXTERNAL_HOST (p. ej. api.<dominio>);
+	# flush_interval -1: las descargas grandes salen en streaming sin búfer.
+	handle /external/* {
 		reverse_proxy api:3001 {
 			flush_interval -1
 		}

@@ -83,6 +83,7 @@ services:
     environment:
       DOMAIN: ":80"
       INGEST_HOST: ${INGEST_HOST:-ingest.invalid}
+      EXTERNAL_HOST: ${EXTERNAL_HOST:-external.invalid}
     volumes:
       - media-data:/srv/media:ro
     mem_limit: 128m
