@@ -37,10 +37,6 @@
 		reverse_proxy api:3001
 	}
 
-	handle /health {
-		reverse_proxy api:3001
-	}
-
 	# SPA: cualquier otra ruta cae en index.html para que React Router la resuelva.
 	handle {
 		root * /srv

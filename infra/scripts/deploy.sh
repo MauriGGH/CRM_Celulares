@@ -31,9 +31,9 @@ fi
 
 "${COMPOSE[@]}" up -d --remove-orphans
 
-# Espera a que la API responda /health (hasta 2 min).
+# Espera a que la API responda /api/v1/health (hasta 2 min).
 for _ in $(seq 1 24); do
-  if "${COMPOSE[@]}" exec -T api wget -qO- http://127.0.0.1:3001/health >/dev/null 2>&1; then
+  if "${COMPOSE[@]}" exec -T api wget -qO- http://127.0.0.1:3001/api/v1/health >/dev/null 2>&1; then
     echo "API sana con ${TAG}"
     docker image prune -f >/dev/null
     exit 0
@@ -41,6 +41,6 @@ for _ in $(seq 1 24); do
   sleep 5
 done
 
-echo "La API no respondió /health; revisar: ${COMPOSE[*]} logs api" >&2
+echo "La API no respondió /api/v1/health; revisar: ${COMPOSE[*]} logs api" >&2
 echo "Para volver atrás: deploy.sh ${PREV_TAG}" >&2
 exit 1

@@ -1,0 +1,6 @@
+# Punto de entrada para `docker compose` desde la raíz del repo.
+# La definición real vive en infra/docker-compose.yml (desarrollo local).
+name: pos-celulares
+include:
+  - path: infra/docker-compose.yml
+    env_file: .env

@@ -1,7 +1,7 @@
 # Infraestructura y operación
 
 Todo corre con Docker Compose. En el VPS, Caddy recibe el tráfico (HTTPS automático),
-sirve el frontend compilado y reenvía `/api`, `/media` y `/health` a la API.
+sirve el frontend compilado y reenvía `/api` y `/media` a la API.
 
 ```
 internet ──443──▶ web (Caddy + SPA) ──▶ api :3001 ──▶ mongo (rs0) / redis
@@ -12,11 +12,11 @@ internet ──443──▶ web (Caddy + SPA) ──▶ api :3001 ──▶ mong
 
 | Servicio | Imagen | Expuesto | Notas |
 |---|---|---|---|
-| `web` | `pos-celulares-web` (Caddy 2.8 + `frontend/dist`) | 80, 443 | Bloquea `/internal/*` y `/api/*/internal/*` (404) |
-| `api` | `pos-celulares-api` (Node 22, usuario `node`) | solo red interna | `GET /health` para healthcheck |
+| `web` (prod) / `caddy` (local) | Caddy 2.8 + `frontend/dist` | 80, 443 | Bloquea `/internal/*` y `/api/*/internal/*` (404) |
+| `api` | `pos-celulares-api` (Node 22, usuario `node`) | solo red interna | `GET /api/v1/health` para healthcheck |
 | `worker` | misma imagen que `api`, `node src/worker.js` | no | Perfil `worker` hasta que exista el worker (B8) |
 | `scraper` | `pos-celulares-scraper` (Python 3.12) | no | Perfil `scraper`; corre por cron/temporizador |
-| `mongo` | `mongo:7`, replica set `rs0` de un nodo | 127.0.0.1 en local, nunca en prod | Transacciones y change streams habilitados |
+| `mongo` | `mongo:7`, replica set `rs0` de un nodo, en nuestro VPS | solo 127.0.0.1 (túnel SSH) | Transacciones y change streams habilitados |
 | `redis` | `redis:7-alpine` con AOF | 127.0.0.1 en local | Colas BullMQ y rate limit |
 | `uptime-kuma` | `louislam/uptime-kuma:1` | 127.0.0.1:3002 | Perfil `monitoring`, entrar por túnel SSH |
 
@@ -26,13 +26,15 @@ internet ──443──▶ web (Caddy + SPA) ──▶ api :3001 ──▶ mong
 cp .env.example .env
 # Generar la clave del replica set:
 sed -i "s|^MONGO_REPLICA_KEY=.*|MONGO_REPLICA_KEY=$(openssl rand -base64 756 | tr -d '\n')|" .env
-docker compose up -d mongo redis          # solo bases de datos
-cd backend && cp .env.example .env && npm ci && npm run dev
-cd frontend && npm ci && npm run dev      # Vite en :5173 con proxy a :3001
+docker compose up -d                      # mongo, redis, api y caddy
+curl http://localhost/api/v1/health       # 200 cuando la API está arriba
 ```
 
-Todo en contenedores: `docker compose up -d` (mongo, redis, api) y
-`docker compose --profile web up -d` para ver el frontend compilado en http://localhost:8080.
+`compose.yaml` en la raíz incluye `infra/docker-compose.yml`. Si el puerto 80 está ocupado,
+cambiar `HTTP_PORT` en `.env`. Caddy sirve `frontend/dist` cuando el equipo de frontend lo compile.
+
+Recarga en caliente del backend: `docker compose up -d mongo redis` y
+`cd backend && cp .env.example .env && npm ci && npm run dev`.
 
 Desde el host, conectar a Mongo con `directConnection=true`
 (`mongodb://pos_api:...@localhost:27017/pos?authSource=pos&directConnection=true`),
@@ -71,14 +73,20 @@ El scraper recibe `SCRAPER_MONGO_URI`, `INGEST_URL` e `INGEST_API_KEY`.
 ## Primer despliegue en un VPS (S4)
 
 1. Crear un VPS Ubuntu 24.04 (2 vCPU / 4 GB es suficiente para empezar) y apuntar el dominio (registro A) a su IP.
-2. Como root: `DEPLOY_PUBKEY="ssh-ed25519 AAAA... ci" bash infra/scripts/provision-vps.sh`
+2. Como root: `DEPLOY_PUBKEY="ssh-ed25519 AAAA... ci" bash infra/scripts/provision.sh`
    (incluir también la llave personal de quien administre).
 3. Como `deploy`: crear `/opt/pos/.env` a partir de `.env.example` con valores reales,
    `DEPLOY_ENV=production`, `SITE_ADDRESS=tu-dominio`, y opcionalmente
    `COMPOSE_PROFILES=worker,scraper,monitoring`.
 4. Configurar el remoto de respaldos: `rclone config` → remoto `backups` tipo S3 (Cloudflare R2 o DO Spaces).
 5. Cargar los secretos del environment en GitHub y lanzar *Deploy* (manual o con push/tag).
-6. Agregar el cron de respaldos (abajo) y el monitor de Uptime Kuma.
+6. Agregar los cron de respaldo y de disco (abajo) y los monitores de Uptime Kuma.
+
+### Conectar un entorno nuevo
+
+1. VPS con `provision.sh`, registro DNS y `/opt/pos/.env` propio (claves nuevas, nunca copiadas de otro entorno).
+2. En GitHub: Settings → Environments → nuevo environment con los secretos de la tabla de arriba.
+3. Agregarlo a las opciones de `workflow_dispatch` en `.github/workflows/deploy.yml` y lanzar el deploy manual.
 
 Staging es un segundo VPS igual (o uno más chico) con su propio dominio, p. ej. `staging.tu-dominio`.
 
@@ -92,15 +100,31 @@ Staging es un segundo VPS igual (o uno más chico) con su propio dominio, p. ej.
   - push a `develop` → staging (tag `sha-xxxxxxx`)
   - tag `v1.2.3` → producción
 - `deploy.sh` corre `npm run migrate --if-present` (índices y migraciones de datos, p. ej. con
-  `migrate-mongo`) antes de reemplazar la API, espera `/health` y deja escrito cómo volver atrás.
+  `migrate-mongo`) antes de reemplazar la API, espera `/api/v1/health` y deja escrito cómo volver atrás.
 
 **Rollback:** `ssh deploy@host 'bash /opt/pos/scripts/deploy.sh <tag-anterior>'`.
 
 ### Ramas (S1)
 
-- `main`: producción, protegida, solo por PR con CI verde. Los releases se marcan con tag `v*`.
-- `develop`: integración, se despliega sola a staging.
-- `feature/<equipo>-<tema>` (p. ej. `feature/back-catalogo`, `feature/scrap-spider-x`): PR hacia `develop`.
+`main` (producción, tags `v*`), `develop` (staging) y `feature/*`. Reglas, Conventional Commits
+y dueños por carpeta en [`CONTRIBUTING.md`](../CONTRIBUTING.md) y [`.github/CODEOWNERS`](../.github/CODEOWNERS).
+Activar en GitHub (Settings → Branches) la protección de `main` y `develop`: PR obligatorio,
+1 revisión de CODEOWNERS y los checks de CI requeridos.
+
+## Rotar secretos (S10)
+
+| Secreto | Cómo rotarlo |
+|---|---|
+| `JWT_SECRET` / `JWT_REFRESH_SECRET` | Cambiar en `/opt/pos/.env` y `docker compose -f docker-compose.prod.yml up -d api worker`. Cierra todas las sesiones. |
+| `INGEST_API_KEY` | Cambiar en `.env` y reiniciar `api` y `scraper` a la vez (comparten el valor). |
+| `APP_DB_PASSWORD` / `SCRAPER_DB_PASSWORD` | `mongosh` como root: `db.getSiblingDB("pos").changeUserPassword("pos_api", "<nueva>")`; luego actualizar `.env` y reiniciar. |
+| `MONGO_ROOT_PASSWORD` | `db.getSiblingDB("admin").changeUserPassword("root", "<nueva>")` y actualizar `.env`. |
+| `SSH_PRIVATE_KEY` (CI) | Generar llave nueva, agregar la pública a `~deploy/.ssh/authorized_keys`, actualizar el secreto y borrar la vieja. |
+| `GHCR_READ_TOKEN` | Nuevo PAT con `read:packages`, actualizar el secreto del environment. |
+| Pagos, S3, Sentry | Generar en el panel del proveedor, actualizar `.env`, reiniciar `api` y `worker`, revocar la anterior. |
+
+Las variables `MONGO_INITDB_*` y `APP_DB_*` solo se aplican al crear el volumen; después
+de esa primera vez, cambiar `.env` no cambia la contraseña en Mongo (por eso el `changeUserPassword`).
 
 ## Respaldos (S8)
 
@@ -115,6 +139,10 @@ Prueba de restauración mensual: `scripts/restore-test.sh` restaura el último r
 contenedor temporal y lista documentos por colección. Restauración real:
 `docker compose -f docker-compose.prod.yml exec -T mongo mongorestore --archive --gzip --drop --oplogReplay -u root -p ... --authenticationDatabase admin < archivo.archive.gz`.
 
+MongoDB vive en nuestro VPS, así que infra corre estos respaldos; el equipo de DB revisa
+que la restauración sea correcta y define índices y modelo. Acceso del equipo de DB:
+`ssh -L 27017:127.0.0.1:27017 deploy@servidor` y conectar con `directConnection=true`.
+
 Las imágenes de productos viven en el bucket S3 (R2/Spaces), con versionado activado en el bucket.
 
 ## Monitoreo y logs (S9)
@@ -122,7 +150,9 @@ Las imágenes de productos viven en el bucket S3 (R2/Spaces), con versionado act
 - **Sentry:** `SENTRY_DSN` para api y worker, `SCRAPER_SENTRY_DSN` para el scraper. El backend inicializa
   `@sentry/node` si la variable existe; `SENTRY_ENVIRONMENT` toma `DEPLOY_ENV`.
 - **Uptime Kuma:** `ssh -L 3002:localhost:3002 deploy@host` y abrir http://localhost:3002.
-  Monitores: `https://tu-dominio/health` cada 60 s y el dominio raíz. Alertas a correo o Telegram.
+  Monitores: `https://tu-dominio/api/v1/health` cada 60 s y el dominio raíz. Alertas a correo o Telegram.
+- **Disco:** monitor tipo *Push* en Uptime Kuma, su URL en `DISK_PUSH_URL` y cron
+  `*/5 * * * * /opt/pos/scripts/disk-check.sh`. Si el disco pasa de 80 % deja de llegar el ping y Kuma alerta.
 - **Logs:** todos los contenedores usan `json-file` con rotación (10 MB × 5). Ver con
   `docker compose -f docker-compose.prod.yml logs -f api`. Caddy y la API escriben JSON (pino).
 
@@ -133,7 +163,7 @@ Infra solo deja preparada la integración: Dockerfile o imagen, servicio en comp
 variables y jobs de CI que se activan solos cuando aparece `scraper/requirements.txt`
 o `frontend/package.json`. Mientras tanto, `web` no se construye y `scraper` queda en su perfil.
 
-- **Backend:** escucha en `PORT=3001`, expone `GET /health` (200 si Mongo y Redis responden),
+- **Backend:** escucha en `PORT=3001`, expone `GET /api/v1/health` (200 si Mongo y Redis responden),
   lee `MONGO_URI` y `REDIS_URL`, define `npm run migrate` (índices) y `src/worker.js` para BullMQ.
   Las rutas internas viven bajo `/internal/v1/*` y exigen `INGEST_API_KEY`.
 - **Scraper:** `scraper/requirements.txt`, módulo ejecutable `python -m scraper`, tests con pytest.

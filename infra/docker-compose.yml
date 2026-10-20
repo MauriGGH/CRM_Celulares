@@ -1,11 +1,10 @@
-# Entorno local completo. Uso:
+# Entorno local. Se usa desde la raíz del repo a través de compose.yaml:
 #   cp .env.example .env
-#   docker compose up -d                       # mongo, redis, api
+#   docker compose up -d                       # mongo, redis, api y caddy -> http://localhost/api/v1/health
 #   docker compose --profile worker up -d      # + worker BullMQ (cuando exista src/worker.js)
-#   docker compose --profile scraper up -d     # + scraper Python (cuando exista scraper/requirements.txt)
-#   docker compose --profile web up -d         # + Caddy sirviendo el frontend compilado en http://localhost:8080
-# Para desarrollo con recarga en caliente: levantar solo mongo y redis y
-# correr `npm run dev` en backend/ y frontend/ desde el host (ver infra/README.md).
+#   docker compose --profile scraper up -d     # + scraper (lo implementa el equipo de scraping)
+# Caddy sirve frontend/dist si existe (lo compila el equipo de frontend).
+# Para recarga en caliente: `docker compose up -d mongo redis` y `npm run dev` en backend/.
 name: pos-celulares
 
 x-logging: &logging
@@ -54,9 +53,9 @@ services:
       SCRAPER_DB_PASSWORD: ${SCRAPER_DB_PASSWORD}
     volumes:
       - mongodata:/data/db
-      - ./infra/mongo/init:/docker-entrypoint-initdb.d:ro
-      - ./infra/mongo/entrypoint.sh:/opt/mongo/entrypoint.sh:ro
-      - ./infra/mongo/healthcheck.sh:/opt/mongo/healthcheck.sh:ro
+      - ./mongo/init:/docker-entrypoint-initdb.d:ro
+      - ./mongo/entrypoint.sh:/opt/mongo/entrypoint.sh:ro
+      - ./mongo/healthcheck.sh:/opt/mongo/healthcheck.sh:ro
     ports:
       - "127.0.0.1:27017:27017"
     healthcheck:
@@ -84,7 +83,7 @@ services:
 
   api:
     init: true
-    build: ./backend
+    build: ../backend
     restart: unless-stopped
     environment: *api-env
     depends_on:
@@ -96,7 +95,7 @@ services:
 
   worker:
     init: true
-    build: ./backend
+    build: ../backend
     profiles: ["worker"]
     restart: unless-stopped
     command: ["node", "src/worker.js"]
@@ -109,7 +108,7 @@ services:
     logging: *logging
 
   scraper:
-    build: ./scraper
+    build: ../scraper
     profiles: ["scraper"]
     restart: "no"
     environment:
@@ -121,15 +120,16 @@ services:
       mongo: { condition: service_healthy }
     logging: *logging
 
-  web:
-    build:
-      context: .
-      dockerfile: infra/caddy/Dockerfile
-    profiles: ["web"]
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
     environment:
       SITE_ADDRESS: ":80"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../frontend/dist:/srv:ro
     ports:
-      - "127.0.0.1:8080:80"
+      - "127.0.0.1:${HTTP_PORT:-80}:80"
     depends_on: [api]
     logging: *logging
 

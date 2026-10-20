@@ -19,5 +19,5 @@ COPY --chown=node:node public ./public
 USER node
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD wget -qO- "http://127.0.0.1:${PORT}/health" >/dev/null || exit 1
+  CMD wget -qO- "http://127.0.0.1:${PORT}/api/v1/health" >/dev/null || exit 1
 CMD ["node", "src/server.js"]

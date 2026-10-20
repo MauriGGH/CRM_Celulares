@@ -122,4 +122,5 @@ jobs:
             -e SITE_ADDRESS=example.com caddy:2.8-alpine caddy validate --config /etc/caddy/Caddyfile
           cp .env.example .env
           docker compose config -q
+          docker compose -f infra/docker-compose.yml --env-file .env config -q
           docker compose -f infra/docker-compose.prod.yml --env-file .env config -q

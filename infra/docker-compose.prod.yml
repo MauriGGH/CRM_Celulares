@@ -54,6 +54,10 @@ services:
       - ./mongo/init:/docker-entrypoint-initdb.d:ro
       - ./mongo/entrypoint.sh:/opt/mongo/entrypoint.sh:ro
       - ./mongo/healthcheck.sh:/opt/mongo/healthcheck.sh:ro
+    # Solo loopback: el equipo de DB administra por túnel SSH
+    # (ssh -L 27017:127.0.0.1:27017 deploy@servidor). Nunca abrir 27017 a internet.
+    ports:
+      - "127.0.0.1:27017:27017"
     healthcheck:
       test: ["CMD", "bash", "/opt/mongo/healthcheck.sh"]
       interval: 10s
@@ -128,7 +132,7 @@ services:
     depends_on: [api]
     logging: *logging
 
-  # Monitoreo externo de /health y alertas. Solo escucha en localhost:
+  # Monitoreo externo de /api/v1/health y alertas. Solo escucha en localhost:
   # se entra con un túnel SSH (ssh -L 3002:localhost:3002 deploy@servidor).
   uptime-kuma:
     image: louislam/uptime-kuma:1
