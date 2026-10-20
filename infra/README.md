@@ -81,6 +81,11 @@ está clonado en `~/pi/docker/CRM_Celulares`, así que no hace falta el runner n
 4. Probar desde la Pi: `curl http://127.0.0.1:8080/api/v1/health`. Desde fuera: `https://<sub>.coliredes-paloalto.uk/api/v1/health`.
 5. Ver logs: `docker compose -f infra/docker-compose.yml -f infra/docker-compose.prod.yml --env-file .env logs -f api`.
 
+Catálogo de modelos del equipo de DB (100 teléfonos de GSMArena en `infra/mongo/seed/modelos.json`):
+`bash infra/scripts/import-modelos.sh prod` los carga en `crm_celulares.modelos` (upsert por `id`, se puede repetir).
+No usar el `docker-compose.yml` que trae el zip del equipo de DB en la Pi: usa `mongo:latest` (no arranca en la Pi 4),
+no es replica set (sin transacciones), publica 27017 y mongo-express (8081) a toda la red con `admin/password123`.
+
 Respaldo opcional: `APP_DIR=$PWD bash infra/scripts/backup.sh` deja el dump en `backups/`.
 
 Lo que sigue en este documento (runner, staging, `provision.sh`, cron, Access y WAF) es para cuando haya un servidor definitivo.
