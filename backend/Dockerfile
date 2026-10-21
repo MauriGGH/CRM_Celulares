@@ -12,6 +12,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY backend/package.json ./
 COPY backend/src ./src
 COPY docs/contracts /app/docs/contracts
+COPY docs/openapi.yaml docs/external-api.yaml /app/docs/
 # Volumen de imágenes de productos (media-data en producción), escribible por node.
 RUN mkdir -p /app/media && chown node:node /app/media
 USER node

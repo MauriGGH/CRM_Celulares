@@ -1,6 +1,11 @@
-/** Logger JSON (pino). En tests queda en silencio. */
+/**
+ * Logger JSON (pino). En desarrollo se puede leer con `npx pino-pretty`.
+ */
 const pino = require('pino');
 
-module.exports = pino({
-  level: process.env.NODE_ENV === 'test' ? 'silent' : process.env.LOG_LEVEL || 'info',
+const logger = pino({
+  level: process.env.LOG_LEVEL || (process.env.NODE_ENV === 'test' ? 'silent' : 'info'),
+  redact: ['req.headers.authorization', 'req.headers.cookie', '*.password', '*.password_hash'],
 });
+
+module.exports = logger;

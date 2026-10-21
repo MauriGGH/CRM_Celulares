@@ -1,0 +1,270 @@
+openapi: 3.1.0
+info:
+  title: CRM Celulares API externa
+  version: 1.0.0
+  description: |-
+    API de solo lectura para sistemas externos (B15). Implementada en backend/src/modules/external.
+
+    - Autenticación: encabezado `X-API-Key: ck_<prefix>_<secreto>`. El gerente crea la llave en /api/v1/admin/api-clients; se muestra una sola vez.
+    - Permisos por llave: `catalog:read`, `stock:read`, `prices:read`, `sales:read`.
+    - Límite por llave (60 por minuto por defecto), informado en `RateLimit-Limit`, `RateLimit-Remaining` y `RateLimit-Reset`; al pasarse, 429 con `Retry-After`.
+    - Listas por cursor: `?limit=1..1000&cursor=<next_cursor>`; orden estable por id, sin huecos ni repetidos. Sincronización incremental con `updated_since`.
+    - Formato: JSON `{ data, meta: { limit, count, next_cursor } }` o CSV con `?format=csv` o `Accept: text/csv` (el cursor va en `X-Next-Cursor`).
+    - Montos en MXN como texto (`"18999.00"`), fechas ISO 8601 UTC. Nunca incluye datos personales de clientes, costos ni IMEI.
+    - Errores: `{ error: { code, message, details } }` con API_KEY_INVALIDA (401), SCOPE_INSUFICIENTE (403), NO_ENCONTRADO (404), VALIDACION (422), DEMASIADAS_SOLICITUDES (429).
+servers:
+  - url: https://api-crm.coliredes-paloalto.uk/external/v1
+  - url: /external/v1
+security:
+  - apiKey: []
+components:
+  securitySchemes:
+    apiKey: { type: apiKey, in: header, name: X-API-Key }
+  parameters:
+    limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } }
+    cursor: { name: cursor, in: query, schema: { type: string }, description: next_cursor de la página anterior }
+    updatedSince: { name: updated_since, in: query, schema: { type: string, format: date-time } }
+    format: { name: format, in: query, schema: { enum: [json, csv], default: json } }
+    from: { name: from, in: query, schema: { type: string, format: date-time } }
+    to: { name: to, in: query, schema: { type: string, format: date-time } }
+  headers:
+    RateLimit-Limit: { schema: { type: integer } }
+    RateLimit-Remaining: { schema: { type: integer } }
+    RateLimit-Reset: { schema: { type: integer }, description: segundos para que se reinicie la ventana }
+    X-Next-Cursor: { schema: { type: string }, description: solo en CSV; ausente en la última página }
+  schemas:
+    Money: { type: string, pattern: '^[0-9]+\.[0-9]{2}$', examples: ['18999.00'] }
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: object }
+    Meta:
+      type: object
+      properties:
+        limit: { type: integer }
+        count: { type: integer }
+        next_cursor: { type: [string, 'null'] }
+    Product:
+      type: object
+      description: Una fila por variante (SKU) publicada.
+      properties:
+        id: { type: string }
+        sku: { type: string }
+        product_id: { type: string }
+        marca: { type: string }
+        modelo: { type: string }
+        color: { type: string }
+        almacenamiento_gb: { type: integer }
+        ram_gb: { type: [integer, 'null'] }
+        condicion: { enum: [nuevo, reacondicionado, usado] }
+        precio: { $ref: '#/components/schemas/Money' }
+        precio_antes: { oneOf: [{ $ref: '#/components/schemas/Money' }, { type: 'null' }] }
+        moneda: { const: MXN }
+        disponible: { type: boolean }
+        gtin: { type: [string, 'null'] }
+        url: { type: string, format: uri }
+        imagen: { type: [string, 'null'] }
+        specs: { type: object, description: solo en JSON }
+        updated_at: { type: string, format: date-time }
+    Stock:
+      type: object
+      properties:
+        id: { type: string }
+        sku: { type: string }
+        warehouse_id: { type: string }
+        almacen: { type: [string, 'null'] }
+        disponible: { type: integer }
+        reservado: { type: integer }
+        updated_at: { type: string, format: date-time }
+    Price:
+      type: object
+      properties:
+        id: { type: string }
+        sku: { type: string }
+        source: { type: string }
+        precio: { $ref: '#/components/schemas/Money' }
+        moneda: { const: MXN }
+        en_stock: { type: boolean }
+        url: { type: [string, 'null'] }
+        captured_at: { type: string, format: date-time }
+    Export:
+      type: object
+      properties:
+        export_id: { type: string }
+        resource: { enum: [products, stock, prices, sales] }
+        format: { enum: [json, csv, xlsx] }
+        filters: { type: object }
+        status: { enum: [en_cola, procesando, listo, fallido, vencido] }
+        rows: { type: [integer, 'null'] }
+        bytes: { type: [integer, 'null'] }
+        download_url: { type: [string, 'null'], format: uri, description: enlace firmado, válido hasta expires_at }
+        expires_at: { type: string, format: date-time }
+        error: { type: [string, 'null'] }
+  responses:
+    Unauthorized: { description: API_KEY_INVALIDA, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Forbidden: { description: SCOPE_INSUFICIENTE, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    TooMany:
+      description: DEMASIADAS_SOLICITUDES
+      headers: { Retry-After: { schema: { type: integer } } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Validation: { description: VALIDACION, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    NotFound: { description: NO_ENCONTRADO, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+paths:
+  /me:
+    get:
+      summary: Cliente de la llave y sus permisos
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { id: { type: string }, nombre: { type: string }, scopes: { type: array, items: { type: string } } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /products:
+    get:
+      summary: Catálogo publicado (catalog:read)
+      parameters:
+        - $ref: '#/components/parameters/updatedSince'
+        - { name: marca, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/format'
+      responses:
+        '200':
+          description: OK
+          headers: { RateLimit-Remaining: { $ref: '#/components/headers/RateLimit-Remaining' }, X-Next-Cursor: { $ref: '#/components/headers/X-Next-Cursor' } }
+          content:
+            application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/Product' } }, meta: { $ref: '#/components/schemas/Meta' } } } }
+            text/csv: { schema: { type: string } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+        '429': { $ref: '#/components/responses/TooMany' }
+  /products/{sku}:
+    get:
+      summary: Un SKU publicado (catalog:read)
+      parameters: [{ name: sku, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Product' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /stock:
+    get:
+      summary: Stock por SKU y almacén (stock:read)
+      parameters:
+        - $ref: '#/components/parameters/updatedSince'
+        - { name: sku, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/format'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/Stock' } }, meta: { $ref: '#/components/schemas/Meta' } } } }
+            text/csv: { schema: { type: string } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /prices/history:
+    get:
+      summary: Histórico de precios de la competencia (prices:read)
+      parameters:
+        - { name: sku, in: query, schema: { type: string } }
+        - { name: source, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/from'
+        - $ref: '#/components/parameters/to'
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/format'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/Price' } }, meta: { $ref: '#/components/schemas/Meta' } } } }
+            text/csv: { schema: { type: string } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /reports/sales:
+    get:
+      summary: Ventas pagadas agregadas (sales:read)
+      description: Solo totales por día (hora de CDMX), marca o SKU. Por defecto, los últimos 30 días.
+      parameters:
+        - { name: group_by, in: query, schema: { enum: [day, brand, sku], default: day } }
+        - $ref: '#/components/parameters/from'
+        - $ref: '#/components/parameters/to'
+        - $ref: '#/components/parameters/format'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  from: { type: string, format: date-time }
+                  to: { type: string, format: date-time }
+                  group_by: { enum: [day, brand, sku] }
+                  moneda: { const: MXN }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        dia: { type: string, description: con group_by=day }
+                        marca: { type: string, description: con group_by=brand }
+                        sku: { type: string, description: con group_by=sku }
+                        nombre: { type: string, description: con group_by=sku }
+                        pedidos: { type: integer }
+                        unidades: { type: integer }
+                        ventas: { $ref: '#/components/schemas/Money' }
+            text/csv: { schema: { type: string } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /exports:
+    post:
+      summary: Exportación masiva asíncrona
+      description: Requiere el permiso del recurso (products → catalog:read, stock → stock:read, prices → prices:read, sales → sales:read). Máximo 200 000 filas.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resource, format]
+              properties:
+                resource: { enum: [products, stock, prices, sales] }
+                format: { enum: [json, csv, xlsx] }
+                filters:
+                  type: object
+                  properties:
+                    updated_since: { type: string, format: date-time }
+                    from: { type: string, format: date-time }
+                    to: { type: string, format: date-time }
+                    sku: { type: string }
+                    source: { type: string }
+                    marca: { type: string }
+                    group_by: { enum: [day, brand, sku] }
+      responses:
+        '202': { description: En cola, content: { application/json: { schema: { type: object, properties: { export_id: { type: string }, status: { const: en_cola } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Validation' }
+  /exports/{id}:
+    get:
+      summary: Estado de una exportación propia y su enlace de descarga
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Export' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /exports/{id}/download:
+    get:
+      summary: Descarga con enlace firmado (sin API key)
+      security: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: expires, in: query, required: true, schema: { type: integer }, description: epoch en segundos }
+        - { name: sig, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Archivo
+          content:
+            application/json: { schema: { type: array, items: { type: object } } }
+            text/csv: { schema: { type: string } }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: { schema: { type: string, format: binary } }
+        '404': { $ref: '#/components/responses/NotFound' }

@@ -27,21 +27,21 @@ La Pi es un **entorno de pruebas**: no hay staging aparte. El acceso administrat
 
 | Tarea | Quién | Fase | Estado |
 | --- | --- | --- | --- |
-| B1 Contrato OpenAPI | Este proyecto | F1 | Esqueleto en PR #1 |
+| B1 Contrato OpenAPI | Este proyecto | F1 | Hecho en el PR de backend (feature/backend-api) |
 | B2 Base del proyecto | Este proyecto | F1 | Hecho en PR #1 |
-| B3 Esquemas Mongoose y seed | Este proyecto | F1 | Pendiente |
-| B4 Estructura modular y helpers | Este proyecto | F1 | Parcial en PR #1 |
-| B5 Autenticación y usuarios | Este proyecto | F1 | Pendiente |
-| B6 Catálogo | Miembro, paquete A | F2 | Pendiente |
-| B7 Inventario e IMEI | Miembro, paquete A | F2 | Pendiente |
-| B8 Carrito, promociones y checkout | Miembro, paquete B | F2 | Pendiente |
-| B9 Pagos | Miembro, paquete B | F2 | Pendiente |
-| B10 Pedidos, envíos y devoluciones | Miembro, paquete C | F2 | Pendiente |
-| B11 Reportes, auditoría y configuración | Miembro, paquete C | F3 | Pendiente |
-| B12 Ingesta del scraping | Este proyecto | F3 | Recepción hecha en PR #1 |
-| B13 Seguridad y observabilidad | Este proyecto | F3 | Pendiente |
-| B15 API de exportación para sistemas externos | Este proyecto (hilo Backend) | F3 | Pendiente |
-| B14 Pruebas | Infraestructura de tests: este proyecto. Tests de cada módulo: su dueño | Continuo | Base hecha en PR #1 |
+| B3 Esquemas Mongoose y seed | Este proyecto | F1 | Hecho en el PR de backend (feature/backend-api) |
+| B4 Estructura modular y helpers | Este proyecto | F1 | Hecho en el PR de backend (feature/backend-api) |
+| B5 Autenticación y usuarios | Este proyecto | F1 | Hecho en el PR de backend (feature/backend-api) |
+| B6 Catálogo | Miembro, paquete A | F2 | Hecho en el PR de backend (feature/backend-api) |
+| B7 Inventario e IMEI | Miembro, paquete A | F2 | Hecho en el PR de backend (feature/backend-api) |
+| B8 Carrito, promociones y checkout | Miembro, paquete B | F2 | Hecho en el PR de backend (feature/backend-api) |
+| B9 Pagos | Miembro, paquete B | F2 | Hecho en el PR de backend (feature/backend-api) |
+| B10 Pedidos, envíos y devoluciones | Miembro, paquete C | F2 | Hecho en el PR de backend (feature/backend-api) |
+| B11 Reportes, auditoría y configuración | Miembro, paquete C | F3 | Hecho en el PR de backend (feature/backend-api) |
+| B12 Ingesta del scraping | Este proyecto | F3 | Hecho en el PR de backend (feature/backend-api) |
+| B13 Seguridad y observabilidad | Este proyecto | F3 | Hecho en el PR de backend (feature/backend-api) |
+| B15 API de exportación para sistemas externos | Este proyecto (hilo Backend) | F3 | Hecho en el PR de backend (feature/backend-api) |
+| B14 Pruebas | Infraestructura de tests: este proyecto. Tests de cada módulo: su dueño | Continuo | Hecho en el PR de backend (feature/backend-api) |
 | S1 a S11 Servidor | m con Claude | F1 a F3 | Ver sección 4 |
 
 Regla para todos: rama `feature/back-<modulo>` desde `develop`, PR con CI verde y una revisión. Nadie cambia `docs/openapi.yaml`, `src/config`, `src/middleware` o los modelos de otro módulo sin avisar en su PR.
