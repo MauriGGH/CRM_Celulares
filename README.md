@@ -42,7 +42,7 @@ Cada carpeta tiene su propio README con cómo trabajar sin Docker.
 
 - [`docs/openapi.yaml`](docs/openapi.yaml): API REST que consume el frontend. Ningún endpoint se mezcla sin estar aquí.
 - [`docs/contracts/ingest-batch.schema.json`](docs/contracts/ingest-batch.schema.json): lote que el scraper envía al backend.
-- [`docs/tareas.md`](docs/tareas.md): lista de tareas de Backend (B1–B14) y Servidor (S1–S10).
+- [`docs/tareas.md`](docs/tareas.md): reparto, recursos y tareas de Backend (B1–B14) y Servidor (S1–S11).
 - [`docs/data-model.md`](docs/data-model.md): colecciones de MongoDB que necesita el backend (a acordar con el equipo de DB).
 
 Cambiar un contrato requiere PR con revisión de los equipos afectados.
