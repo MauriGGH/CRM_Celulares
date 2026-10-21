@@ -12,8 +12,6 @@ Punto de venta online de celulares. Monorepo con cuatro partes que se integran a
 
 MongoDB corre en nuestro VPS como contenedor (lo opera el equipo de servidor); el equipo de base de datos valida el modelo e índices.
 
-Documento de arquitectura: https://claude.ai/artifact/PuNMNtRLKqa69QC2MptoV5
-
 ## Arquitectura en una línea
 
 El frontend habla solo con la API (`/api/v1`). El servicio de scraping entrega lotes limpios a la API por
