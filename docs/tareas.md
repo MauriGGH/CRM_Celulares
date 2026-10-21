@@ -1,6 +1,6 @@
 # Tareas de Backend y Servidor: reparto, recursos y detalle
 
-Repo: https://github.com/MauriGGH/CRM_Celulares · Arquitectura: https://claude.ai/artifact/PuNMNtRLKqa69QC2MptoV5
+Repo: https://github.com/MauriGGH/CRM_Celulares
 Código de referencia: https://github.com/MauriGGH/mochi-matcha-react (backend Express)
 
 **Decisiones vigentes:** tienda solo en línea y solo México (MXN, PayPal y Mercado Pago). Node.js 22 + Express 4 + Mongoose 8 + Redis 7 + BullMQ. MongoDB en replica set (transacciones). Servidor: **Raspberry Pi** en casa del responsable, publicada con **Cloudflare Tunnel** en el dominio de Cloudflare (sin abrir puertos del router). Base de datos, scraping y frontend son de otros equipos; aquí solo se preparan sus puntos de integración.
@@ -21,7 +21,7 @@ La Pi es un **entorno de pruebas**: no hay staging aparte. El acceso administrat
 
 ## 1. Reparto
 
-**Este proyecto (m con Claude):** la base que todos usan, las piezas transversales, la integración con los otros equipos y todo el servidor. Son las tareas donde un error afecta a todos y donde conviene una sola mano.
+**Este proyecto (m):** la base que todos usan, las piezas transversales, la integración con los otros equipos y todo el servidor. Son las tareas donde un error afecta a todos y donde conviene una sola mano.
 
 **Otros miembros del equipo de backend:** módulos de negocio autocontenidos, cada uno con su contrato en OpenAPI y sus colecciones definidas. Se reparten en 3 paquetes para que cada persona (o pareja) trabaje en su carpeta sin pisar a los demás.
 
@@ -42,7 +42,7 @@ La Pi es un **entorno de pruebas**: no hay staging aparte. El acceso administrat
 | B13 Seguridad y observabilidad | Este proyecto | F3 | Pendiente |
 | B15 API de exportación para sistemas externos | Este proyecto (hilo Backend) | F3 | Pendiente |
 | B14 Pruebas | Infraestructura de tests: este proyecto. Tests de cada módulo: su dueño | Continuo | Base hecha en PR #1 |
-| S1 a S11 Servidor | m con Claude | F1 a F3 | Ver sección 4 |
+| S1 a S11 Servidor | m | F1 a F3 | Ver sección 4 |
 
 Regla para todos: rama `feature/back-<modulo>` desde `develop`, PR con CI verde y una revisión. Nadie cambia `docs/openapi.yaml`, `src/config`, `src/middleware` o los modelos de otro módulo sin avisar en su PR.
 
@@ -203,28 +203,28 @@ Regla para todos: rama `feature/back-<modulo>` desde `develop`, PR con CI verde 
 
 ---
 
-## 4. Servidor: tareas detalladas (m con Claude)
+## 4. Servidor: tareas detalladas (m)
 
-Cómo se reparte el trabajo: Claude escribe en el repo los archivos (compose, Caddyfile, workflows, scripts) y m ejecuta lo que requiere la Pi física, el router o los paneles de Cloudflare y GitHub.
+Cómo se reparte el trabajo: los archivos (compose, Caddyfile, workflows, scripts) van en el repo y m ejecuta lo que requiere la Pi física, el router o los paneles de Cloudflare y GitHub.
 
 #### S1. Repositorio y flujo (F1)
 - Ramas `main` (producción) y `develop` (staging); protección con PR, una revisión y CI verde; `CODEOWNERS` por carpeta.
-- **Claude:** archivo `CODEOWNERS` y rama `develop`. **m:** activar protección de ramas en GitHub y dar acceso a los miembros.
+- **Repo:** archivo `CODEOWNERS` y rama `develop`. **m:** activar protección de ramas en GitHub y dar acceso a los miembros.
 
 #### S2. Imágenes para ARM (F1)
 - La Pi es arm64: el CI debe construir la imagen del backend para `linux/arm64` (y `amd64` para las laptops) con `docker buildx` y publicarla en GHCR.
-- **Claude:** workflow `build.yml`. **Terminado cuando:** `docker pull ghcr.io/mauriggh/crm-celulares-backend:develop` funciona en la Pi.
+- **Repo:** workflow `build.yml`. **Terminado cuando:** `docker pull ghcr.io/mauriggh/crm-celulares-backend:develop` funciona en la Pi.
 
 #### S3. Preparar la Raspberry Pi (F1)
 - Instalar el sistema de 64 bits; arrancar desde el SSD o montar el SSD en `/srv` y poner ahí Docker (`data-root`).
 - Usuario sin root, SSH solo con llave, `ufw` (solo SSH desde la red local), `fail2ban`, actualizaciones automáticas, Docker y Docker Compose.
 - Reserva DHCP para IP fija.
-- **Claude:** `infra/scripts/provision.sh` que hace todo lo anterior. **m:** grabar el sistema, conectar la Pi y correr el script.
+- **Repo:** `infra/scripts/provision.sh` que hace todo lo anterior. **m:** grabar el sistema, conectar la Pi y correr el script.
 
 #### S4. Docker Compose de producción en la Pi (F1)
 - Ajustar `infra/docker-compose.prod.yml` a la Pi: límites de memoria por servicio, imagen de Mongo según el modelo de Pi, volumen de medios para imágenes, sin puertos publicados (todo entra por el túnel).
 - Dos instancias en la misma Pi: `prod` y `staging` (proyectos de Compose separados, bases `crm_celulares` y `crm_celulares_staging`).
-- **Claude:** archivos. **m:** primer `docker compose up` en la Pi.
+- **Repo:** archivos. **m:** primer `docker compose up` en la Pi.
 
 #### S5. MongoDB en la Pi (F1)
 - **La Pi del proyecto es una Pi 4 → `mongo:4.4.18`** (aplicado en el PR #2). Si algún día se cambia a Pi 5: `mongo:8.0` arm64. En Pi 4 solo hasta `mongo:4.4.18` (MongoDB 5+ exige ARMv8.2, que la Pi 4 no tiene); en ese caso `competitor_prices` es colección normal en lugar de time series. Las transacciones funcionan en ambos casos.
@@ -238,25 +238,25 @@ Cómo se reparte el trabajo: Claude escribe en el repo los archivos (compose, Ca
 - SSL/TLS en modo Full; regla de WAF que bloquee `/internal/*` en todos los hostnames.
 - Para sistemas externos (B15): `api.<dominio>` → caddy, solo `/external/*`, con regla de rate limit en Cloudflare.
 - Para el equipo de scraping: `ingest.<dominio>` → `/internal/v1/ingest` protegido con un Service Token de Cloudflare Access además del token de la API.
-- **Claude:** compose y documentación; crear rutas y DNS con el conector de Cloudflare cuando conecte. **m:** crear el túnel y copiar el token a la Pi (`.env`).
+- **Repo:** compose y documentación; crear rutas y DNS con el conector de Cloudflare. **m:** crear el túnel y copiar el token a la Pi (`.env`).
 
 #### S7. Caddy interno (F2)
 - Detrás del túnel Caddy escucha en HTTP (Cloudflare pone el HTTPS): `/api/*` → `api:3001`, `/media/*` → volumen de imágenes, resto → `frontend/dist`, `/internal/*` → 403 salvo desde `ingest.<dominio>`.
-- **Claude:** actualizar `infra/caddy/Caddyfile`.
+- **Repo:** actualizar `infra/caddy/Caddyfile`.
 
 #### S8. Despliegue continuo (F2)
 - La Pi está detrás del router, así que GitHub no puede entrar por SSH directo. Se usa un **runner propio de GitHub Actions en la Pi**: merge a `develop` → despliega staging; tag `v*` en `main` → despliega producción (`docker compose pull && up -d`, migración de índices, prueba de `/api/v1/health`).
-- **Claude:** workflow `deploy.yml`. **m:** registrar el runner en la Pi (GitHub → Settings → Actions → Runners) y cargar los secretos de entorno.
+- **Repo:** workflow `deploy.yml`. **m:** registrar el runner en la Pi (GitHub → Settings → Actions → Runners) y cargar los secretos de entorno.
 
 #### S9. Respaldos (F2)
 - `mongodump --archive --gzip` diario por cron al SSD, 14 días de retención, y copia fuera de la casa (R2 o Google Drive con `rclone`).
 - Prueba de restauración en staging una vez al mes.
-- **Claude:** `infra/scripts/backup.sh` y `restore.sh`. **m:** credenciales de R2 o Drive y el cron.
+- **Repo:** `infra/scripts/backup.sh` y `restore.sh`. **m:** credenciales de R2 o Drive y el cron.
 
 #### S10. Monitoreo (F3)
 - Monitor externo (UptimeRobot gratis o notificaciones de salud de Cloudflare) contra `https://<dominio>/api/v1/health`: si la Pi se cae, un monitor dentro de ella no avisa.
 - Alertas de temperatura (`vcgencmd measure_temp` > 75 °C), disco > 80% y memoria; rotación de logs de Docker; Sentry para errores.
-- **Claude:** script de chequeo y configuración. **m:** cuentas de alertas.
+- **Repo:** script de chequeo y configuración. **m:** cuentas de alertas.
 
 #### S11. Operación (F3)
 - `infra/README.md`: desplegar, revertir a la imagen anterior, restaurar respaldo, rotar secretos, qué hacer si se va la luz o el internet (la Pi debe arrancar sola todos los servicios con `restart: unless-stopped`).
