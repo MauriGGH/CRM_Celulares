@@ -94,11 +94,15 @@ services:
   # Cloudflare Tunnel: conexión saliente de la Pi a Cloudflare. El hostname
   # público (p. ej. tienda.<dominio> -> http://caddy:80) se configura en el
   # panel Zero Trust del túnel; aquí solo va su token.
+  # Opcional (perfil "tunnel"): solo si el CRM tiene su propio túnel. En la Pi de
+  # pruebas el tráfico entra por el nginx del host (infra/nginx/crm-celulares.conf),
+  # que ya recibe el túnel de Cloudflare de todas las apps.
   cloudflared:
     image: cloudflare/cloudflared:2025.8.1
+    profiles: ["tunnel"]
     command: ["tunnel", "--no-autoupdate", "run"]
     environment:
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?falta TUNNEL_TOKEN}
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
     depends_on:
       - caddy
     restart: unless-stopped
