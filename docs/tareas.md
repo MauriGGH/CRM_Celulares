@@ -5,6 +5,18 @@ Código de referencia: https://github.com/MauriGGH/mochi-matcha-react (backend E
 
 **Decisiones vigentes:** tienda solo en línea y solo México (MXN, PayPal y Mercado Pago). Node.js 22 + Express 4 + Mongoose 8 + Redis 7 + BullMQ. MongoDB en replica set (transacciones). Servidor: **Raspberry Pi** en casa del responsable, publicada con **Cloudflare Tunnel** en el dominio de Cloudflare (sin abrir puertos del router). Base de datos, scraping y frontend son de otros equipos; aquí solo se preparan sus puntos de integración.
 
+**Dominios (Cloudflare, un solo nivel bajo `coliredes-paloalto.uk` para que cubra el certificado gratuito):**
+
+| Uso | Hostname |
+| --- | --- |
+| Tienda y API (`/api/v1`) | `crm-celulares.coliredes-paloalto.uk` |
+| API para sistemas externos (`/external/v1`) | `api-crm.coliredes-paloalto.uk` |
+| Staging | `staging-crm.coliredes-paloalto.uk` |
+| Ingesta del scraping (`/internal/v1/ingest`) | `ingest-crm.coliredes-paloalto.uk` (con Cloudflare Access) |
+| SSH del equipo | `ssh-crm.coliredes-paloalto.uk` (con Cloudflare Access) |
+
+En el resto del documento, `<dominio>` y sus subdominios se refieren a estos hostnames.
+
 **Fases:** F1 = base para que todos puedan trabajar (semana 1). F2 = flujo de compra completo. F3 = operación, reportes e integración con scraping.
 
 ---
