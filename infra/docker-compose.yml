@@ -1,138 +1,98 @@
-# Entorno local. Se usa desde la raíz del repo a través de compose.yaml:
+# Entorno local completo. Desde la raíz del repo:
 #   cp .env.example .env
-#   docker compose up -d                       # mongo, redis, api y caddy -> http://localhost/api/v1/health
-#   docker compose --profile worker up -d      # + worker BullMQ (cuando exista src/worker.js)
-#   docker compose --profile scraper up -d     # + scraper (lo implementa el equipo de scraping)
-# Caddy sirve frontend/dist si existe (lo compila el equipo de frontend).
-# Para recarga en caliente: `docker compose up -d mongo redis` y `npm run dev` en backend/.
-name: pos-celulares
-
-x-logging: &logging
-  driver: json-file
-  options:
-    max-size: "10m"
-    max-file: "3"
-
-x-api-env: &api-env
-  NODE_ENV: ${NODE_ENV:-development}
-  PORT: 3001
-  MONGO_URI: mongodb://${APP_DB_USER}:${APP_DB_PASSWORD}@mongo:27017/${APP_DB_NAME}?authSource=${APP_DB_NAME}&replicaSet=rs0
-  REDIS_URL: redis://redis:6379
-  JWT_SECRET: ${JWT_SECRET}
-  JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
-  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-  CORS_ORIGIN: ${CORS_ORIGIN}
-  INGEST_API_KEY: ${INGEST_API_KEY}
-  SENTRY_DSN: ${SENTRY_DSN:-}
-  S3_ENDPOINT: ${S3_ENDPOINT:-}
-  S3_REGION: ${S3_REGION:-auto}
-  S3_BUCKET: ${S3_BUCKET:-}
-  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
-  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
-  S3_PUBLIC_URL: ${S3_PUBLIC_URL:-}
-  PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
-  PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
-  PAYPAL_MODE: ${PAYPAL_MODE:-sandbox}
-  MP_ACCESS_TOKEN: ${MP_ACCESS_TOKEN:-}
-  MP_WEBHOOK_SECRET: ${MP_WEBHOOK_SECRET:-}
+#   docker compose -f infra/docker-compose.yml --env-file .env up -d --build
+#
+# En staging/producción se usa además infra/docker-compose.prod.yml, que quita
+# el Mongo de desarrollo (la base la entrega el equipo de DB) y usa imágenes de GHCR.
+name: crm-celulares
 
 services:
   mongo:
-    image: mongo:7
-    restart: unless-stopped
-    entrypoint: ["/bin/bash", "/opt/mongo/entrypoint.sh"]
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-root}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
-      MONGO_REPLICA_KEY: ${MONGO_REPLICA_KEY}
-      APP_DB_NAME: ${APP_DB_NAME}
-      APP_DB_USER: ${APP_DB_USER}
-      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
-      SCRAPER_DB_NAME: ${SCRAPER_DB_NAME}
-      SCRAPER_DB_USER: ${SCRAPER_DB_USER}
-      SCRAPER_DB_PASSWORD: ${SCRAPER_DB_PASSWORD}
-    volumes:
-      - mongodata:/data/db
-      - ./mongo/init:/docker-entrypoint-initdb.d:ro
-      - ./mongo/entrypoint.sh:/opt/mongo/entrypoint.sh:ro
-      - ./mongo/healthcheck.sh:/opt/mongo/healthcheck.sh:ro
+    # Misma versión que la Raspberry Pi 4 (mongo:4.4.18) para no usar funciones de 5.0+.
+    image: ${MONGO_IMAGE:-mongo:4.4.18}
+    # Replica set de un nodo: MongoDB solo permite transacciones en replica set.
+    command: ["--replSet", "rs0", "--bind_ip_all"]
     ports:
       - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo-data:/data/db
     healthcheck:
-      test: ["CMD", "bash", "/opt/mongo/healthcheck.sh"]
+      # mongo:4.4 trae "mongo"; mongo:5+ trae "mongosh".
+      test: ["CMD-SHELL", "S=$$(command -v mongosh || command -v mongo); $$S --quiet --eval \"db.adminCommand('ping').ok\" | grep -q 1"]
       interval: 10s
-      timeout: 10s
-      start_period: 30s
-      retries: 20
-    logging: *logging
+      timeout: 5s
+      retries: 10
+
+  mongo-init:
+    image: ${MONGO_IMAGE:-mongo:4.4.18}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: "no"
+    entrypoint:
+      - sh
+      - -c
+      - |
+        S=$$(command -v mongosh || command -v mongo)
+        exec $$S --host mongo:27017 --quiet --eval "
+          var st; try { st = rs.status() } catch (e) { st = { ok: 0 } }
+          if (st.ok !== 1) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }) }
+          while (!db.isMaster().ismaster) { sleep(500) }
+          print('replica set listo')"
 
   redis:
     image: redis:7-alpine
-    restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
-      - redisdata:/data
-    ports:
-      - "127.0.0.1:6379:6379"
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-    logging: *logging
+      interval: 10s
+      retries: 5
 
   api:
-    init: true
-    build: ../backend
-    restart: unless-stopped
-    environment: *api-env
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    env_file: ../.env
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
     depends_on:
-      mongo: { condition: service_healthy }
-      redis: { condition: service_healthy }
-    ports:
-      - "127.0.0.1:3001:3001"
-    logging: *logging
+      mongo-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
 
   worker:
-    init: true
-    build: ../backend
-    profiles: ["worker"]
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    command: ["node", "src/jobs/worker.js"]
+    env_file: ../.env
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     restart: unless-stopped
-    command: ["node", "src/worker.js"]
-    environment: *api-env
-    healthcheck:
-      disable: true
-    depends_on:
-      mongo: { condition: service_healthy }
-      redis: { condition: service_healthy }
-    logging: *logging
-
-  scraper:
-    build: ../scraper
-    profiles: ["scraper"]
-    restart: "no"
-    environment:
-      SCRAPER_MONGO_URI: mongodb://${SCRAPER_DB_USER}:${SCRAPER_DB_PASSWORD}@mongo:27017/${SCRAPER_DB_NAME}?authSource=${SCRAPER_DB_NAME}&replicaSet=rs0
-      INGEST_URL: http://api:3001/internal/v1/ingest/batches
-      INGEST_API_KEY: ${INGEST_API_KEY}
-      SENTRY_DSN: ${SCRAPER_SENTRY_DSN:-}
-    depends_on:
-      mongo: { condition: service_healthy }
-    logging: *logging
 
   caddy:
-    image: caddy:2.8-alpine
-    restart: unless-stopped
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
     environment:
-      SITE_ADDRESS: ":80"
+      DOMAIN: ${DOMAIN:-localhost}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ../frontend/dist:/srv:ro
-    ports:
-      - "127.0.0.1:${HTTP_PORT:-80}:80"
-    depends_on: [api]
-    logging: *logging
+      - ../frontend/dist:/srv/frontend:ro
+      - caddy-data:/data
+    depends_on:
+      - api
+    restart: unless-stopped
 
 volumes:
-  mongodata:
-  redisdata:
+  mongo-data:
+  redis-data:
+  caddy-data:

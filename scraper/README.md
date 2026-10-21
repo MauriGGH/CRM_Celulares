@@ -1,16 +1,27 @@
-# scraper/
+# Scraping y limpieza de datos (otro equipo)
 
-Servicio Python 3.12 de scraping y limpieza de datos. **Lo implementa el equipo de datos (tareas D1–D10); esta carpeta es solo el punto de integración que deja infra.** No hay código aquí todavía.
+Este módulo lo desarrolla otro equipo. Esta carpeta queda reservada por si deciden integrarlo en este repo.
 
-Infra ya deja listo:
+## Cómo se integra con el backend
 
-- `Dockerfile` multi-etapa con usuario sin root. Espera un `requirements.txt` aquí.
-- Servicio `scraper` en `docker-compose.yml` bajo el perfil `scraper`
-  (`docker compose --profile scraper up scraper`).
-- Usuario de MongoDB `pos_scraper` con readWrite solo en la base `scraping`
-  (páginas crudas, listados crudos y limpios); sin acceso a la base de la tienda.
-- Variables `SCRAPER_MONGO_URI`, `INGEST_URL` e `INGEST_API_KEY` en `.env.example`.
-- Job de CI que corre `pytest` en cuanto exista `scraper/requirements.txt`.
+- **Único punto de entrada:** `POST /internal/v1/ingest/batches` (red interna, no expuesto a Internet).
+- **Autenticación:** `Authorization: Bearer <INGEST_SERVICE_TOKEN>` (lo entrega el equipo de servidor).
+- **Idempotencia:** encabezado `Idempotency-Key` obligatorio; reenviar la misma llave no duplica el lote.
+- **Contrato:** [`docs/contracts/ingest-batch.schema.json`](../docs/contracts/ingest-batch.schema.json) (JSON Schema 2020-12, versión 1.0) y
+  [ejemplo](../docs/contracts/examples/ingest-batch.example.json). Hasta 1000 registros por lote, precios en MXN como texto `"18999.00"`.
+- **Respuestas:** `202 { batch_id, status: "en_cola" }`, `200` si la llave ya existía, `401` sin token, `422 LOTE_INVALIDO` con el detalle de errores.
+- **Estado:** `GET /internal/v1/ingest/batches/:id` devuelve estado y conteos (`coincide`, `nuevo`, `conflicto`, `invalido`).
+- **Llave de empate:** `marca|modelo|almacenamiento|color` en minúsculas, sin acentos y con guiones (ver `docs/data-model.md`).
 
-El scraper solo entrega lotes limpios a `POST http://api:3001/internal/v1/ingest/batches`
-por la red interna de Docker. `/internal/*` está bloqueado desde internet en Caddy.
+El scraping nunca escribe en la base de ventas; sus datos crudos viven en su propia base.
+Cambios al contrato: PR que aprueben backend y scraping.
+
+## Probar contra el backend local
+
+```bash
+curl -X POST http://localhost:3001/internal/v1/ingest/batches \
+  -H "Authorization: Bearer $INGEST_SERVICE_TOKEN" \
+  -H "Idempotency-Key: prueba-1" \
+  -H "Content-Type: application/json" \
+  --data @docs/contracts/examples/ingest-batch.example.json
+```

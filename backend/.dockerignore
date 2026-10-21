@@ -2,6 +2,3 @@ node_modules
 tests
 coverage
 .env
-.env.*
-!.env.example
-*.log

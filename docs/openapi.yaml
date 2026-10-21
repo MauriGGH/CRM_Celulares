@@ -1,0 +1,208 @@
+openapi: 3.1.0
+info:
+  title: CRM Celulares API
+  version: 0.1.0
+  description: |
+    Contrato entre backend y frontend. Esqueleto inicial: el equipo backend (tarea B1)
+    completa los esquemas de cada endpoint antes de implementarlo.
+    Convenciones: JSON snake_case, montos como texto decimal, moneda MXN, fechas ISO 8601 UTC.
+servers:
+  - url: /api/v1
+tags:
+  - name: health
+  - name: auth
+  - name: catalog
+  - name: cart
+  - name: checkout
+  - name: orders
+  - name: admin
+  - name: ingest
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    serviceToken:
+      type: http
+      scheme: bearer
+      description: INGEST_SERVICE_TOKEN, solo para /internal/*
+  parameters:
+    page: { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+    limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, examples: [STOCK_INSUFICIENTE] }
+            message: { type: string }
+            details: { type: object }
+    PageMeta:
+      type: object
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+    Money:
+      type: string
+      pattern: '^[0-9]+\.[0-9]{2}$'
+      examples: ['18999.00']
+    Variant:
+      type: object
+      properties:
+        sku: { type: string }
+        color: { type: string }
+        almacenamiento_gb: { type: integer }
+        ram_gb: { type: integer }
+        precio: { $ref: '#/components/schemas/Money' }
+        precio_antes: { $ref: '#/components/schemas/Money' }
+        disponible: { type: boolean }
+    ProductSummary:
+      type: object
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        marca: { type: string }
+        modelo: { type: string }
+        condicion: { enum: [nuevo, reacondicionado, usado] }
+        precio_desde: { $ref: '#/components/schemas/Money' }
+        imagen: { type: string, format: uri }
+    Product:
+      allOf:
+        - $ref: '#/components/schemas/ProductSummary'
+        - type: object
+          properties:
+            descripcion: { type: string }
+            garantia_meses: { type: integer }
+            specs: { type: object }
+            images: { type: array, items: { type: string, format: uri } }
+            variants: { type: array, items: { $ref: '#/components/schemas/Variant' } }
+  responses:
+    Error:
+      description: Error estándar
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Estado de la API y de MongoDB
+      responses:
+        '200': { description: OK }
+        '503': { description: MongoDB desconectado }
+  /auth/register:
+    post: { tags: [auth], summary: Registro de cliente, responses: { '201': { description: Creado }, '422': { $ref: '#/components/responses/Error' } } }
+  /auth/login:
+    post: { tags: [auth], summary: Login (staff y clientes), responses: { '200': { description: Token de acceso y cookie de refresh }, '401': { $ref: '#/components/responses/Error' } } }
+  /auth/refresh:
+    post: { tags: [auth], summary: Renueva el token de acceso con la cookie httpOnly, responses: { '200': { description: OK } } }
+  /auth/logout:
+    post: { tags: [auth], summary: Cierra sesión, responses: { '204': { description: OK } } }
+  /auth/me:
+    get: { tags: [auth], security: [{ bearer: [] }], summary: Usuario actual, responses: { '200': { description: OK } } }
+  /products:
+    get:
+      tags: [catalog]
+      summary: Catálogo público con filtros
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/limit'
+        - { name: q, in: query, schema: { type: string } }
+        - { name: brand, in: query, schema: { type: string }, description: slug de marca }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: min_price, in: query, schema: { type: number } }
+        - { name: max_price, in: query, schema: { type: number } }
+        - { name: storage_gb, in: query, schema: { type: integer } }
+        - { name: condition, in: query, schema: { enum: [nuevo, reacondicionado, usado] } }
+        - { name: sort, in: query, schema: { enum: [precio_asc, precio_desc, recientes] } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ProductSummary' } }
+                  meta: { $ref: '#/components/schemas/PageMeta' }
+  /products/{slug}:
+    get:
+      tags: [catalog]
+      parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Product' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /brands:
+    get: { tags: [catalog], summary: Marcas, responses: { '200': { description: OK } } }
+  /categories:
+    get: { tags: [catalog], summary: Categorías, responses: { '200': { description: OK } } }
+  /cart:
+    get: { tags: [cart], security: [{ bearer: [] }], summary: Carrito del cliente, responses: { '200': { description: OK } } }
+  /cart/items:
+    post: { tags: [cart], security: [{ bearer: [] }], summary: Agrega un SKU, responses: { '200': { description: OK }, '409': { $ref: '#/components/responses/Error' } } }
+  /cart/items/{sku}:
+    patch: { tags: [cart], security: [{ bearer: [] }], summary: Cambia cantidad, parameters: [{ name: sku, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+    delete: { tags: [cart], security: [{ bearer: [] }], summary: Quita un SKU, parameters: [{ name: sku, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+  /cart/coupon:
+    post: { tags: [cart], security: [{ bearer: [] }], summary: Aplica un cupón, responses: { '200': { description: OK }, '422': { $ref: '#/components/responses/Error' } } }
+  /checkout:
+    post: { tags: [checkout], security: [{ bearer: [] }], summary: Crea pedido pendiente_pago y reserva stock 15 min, parameters: [{ name: Idempotency-Key, in: header, required: true, schema: { type: string } }], responses: { '201': { description: Pedido creado }, '409': { $ref: '#/components/responses/Error' } } }
+  /payments/{provider}/create:
+    post: { tags: [checkout], security: [{ bearer: [] }], parameters: [{ name: provider, in: path, required: true, schema: { enum: [paypal, mercadopago] } }], responses: { '200': { description: Orden del proveedor } } }
+  /payments/{provider}/capture:
+    post: { tags: [checkout], security: [{ bearer: [] }], parameters: [{ name: provider, in: path, required: true, schema: { enum: [paypal, mercadopago] } }], responses: { '200': { description: Pago capturado } } }
+  /webhooks/{provider}:
+    post: { tags: [checkout], summary: Webhook firmado del proveedor, parameters: [{ name: provider, in: path, required: true, schema: { enum: [paypal, mercadopago] } }], responses: { '200': { description: OK } } }
+  /orders:
+    get: { tags: [orders], security: [{ bearer: [] }], summary: Pedidos del cliente, responses: { '200': { description: OK } } }
+  /orders/{id}:
+    get: { tags: [orders], security: [{ bearer: [] }], parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+  /admin/products:
+    get: { tags: [admin], security: [{ bearer: [] }], summary: Lista de productos (gerente), responses: { '200': { description: OK } } }
+    post: { tags: [admin], security: [{ bearer: [] }], summary: Crea producto con variantes, responses: { '201': { description: OK } } }
+  /admin/stock/movements:
+    post: { tags: [admin], security: [{ bearer: [] }], summary: Registra entrada, ajuste o traspaso, responses: { '201': { description: OK } } }
+  /admin/serials:
+    post: { tags: [admin], security: [{ bearer: [] }], summary: Alta de IMEI en lote, responses: { '201': { description: OK } } }
+  /admin/orders/{id}/status:
+    patch: { tags: [admin], security: [{ bearer: [] }], parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+  /admin/reports/sales:
+    get: { tags: [admin], security: [{ bearer: [] }], responses: { '200': { description: OK } } }
+  /admin/ingest/records:
+    get: { tags: [admin], security: [{ bearer: [] }], summary: Cola de revisión de la ingesta, parameters: [{ name: resultado, in: query, schema: { enum: [nuevo, conflicto, invalido] } }], responses: { '200': { description: OK } } }
+  /admin/ingest/records/{id}/approve:
+    post: { tags: [admin], security: [{ bearer: [] }], parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+  /admin/competitor-prices:
+    get: { tags: [admin], security: [{ bearer: [] }], parameters: [{ name: sku, in: query, schema: { type: string } }], responses: { '200': { description: Histórico de precios } } }
+  /internal/v1/ingest/batches:
+    servers: [{ url: / }]
+    post:
+      tags: [ingest]
+      summary: Recibe un lote del scraper (solo red interna)
+      security: [{ serviceToken: [] }]
+      parameters: [{ name: Idempotency-Key, in: header, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: './contracts/ingest-batch.schema.json' }
+      responses:
+        '202': { description: Lote en cola, content: { application/json: { schema: { type: object, properties: { batch_id: { type: string }, status: { const: en_cola } } } } } }
+        '200': { description: Lote ya recibido con esa Idempotency-Key }
+        '401': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /internal/v1/ingest/batches/{id}:
+    servers: [{ url: / }]
+    get:
+      tags: [ingest]
+      security: [{ serviceToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Estado y conteos (coincide, nuevo, conflicto, invalido) }
+        '404': { $ref: '#/components/responses/Error' }

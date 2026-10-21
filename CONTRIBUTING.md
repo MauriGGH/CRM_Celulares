@@ -1,45 +1,48 @@
-# Cómo contribuir
-
-## Carpetas y equipos
-
-| Carpeta | Equipo |
-|---|---|
-| `backend/` | Backend (API Node.js + worker) |
-| `infra/`, `.github/`, `compose.yaml` | Servidor / infraestructura |
-| `docs/` | Contratos compartidos (`openapi.yaml`, `contracts/`, `data-model.md`) |
-| `frontend/` | Equipo de frontend (se desarrolla fuera de este proyecto; aquí solo se integra) |
-| `scraper/` | Equipo de scraping y limpieza de datos (ídem) |
-
-Cada equipo trabaja en su carpeta. Un cambio a un contrato de `docs/` se hace por PR y lo
-aprueban los dos equipos involucrados.
+# Cómo colaborar
 
 ## Ramas
 
-- `main`: producción. Solo recibe merges desde `develop` (o `hotfix/*`). Cada release se marca con un tag `v1.2.3`, que despliega a producción.
+- `main`: producción. Solo recibe merges desde `develop` o hotfixes. Cada tag `v*` despliega a producción.
 - `develop`: integración. Cada merge despliega a staging.
-- `feature/<area>-<tema>`: trabajo diario, p. ej. `feature/back-checkout`, `feature/infra-backups`. PR hacia `develop`.
-- `hotfix/<tema>`: arreglo urgente desde `main`; luego se integra también a `develop`.
+- `feature/<equipo>-<tema>`: trabajo diario. Ejemplos: `feature/back-catalogo`, `feature/infra-caddy`, `feature/back-ingesta`.
+- `fix/<tema>`: correcciones.
 
-Protección de `main` y `develop`: PR obligatorio, 1 revisión aprobada (CODEOWNERS), CI en verde y sin push directo.
+Todo entra por Pull Request hacia `develop`, con al menos una revisión y CI en verde.
 
-## Commits: Conventional Commits
+## Commits
+
+Formato [Conventional Commits](https://www.conventionalcommits.org/es/) con el alcance del equipo:
 
 ```
-<tipo>(<ámbito>): <resumen en minúsculas, imperativo>
+feat(backend): agrega endpoint de catálogo con filtros
+fix(backend): corrige cálculo de stock reservado
+chore(infra): agrega respaldo diario de MongoDB
+docs(contracts): sube schema_version del lote a 1.1
 ```
 
-Tipos: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `ci`, `build`, `perf`.
-Ámbitos sugeridos: `auth`, `catalog`, `inventory`, `cart`, `orders`, `payments`, `ingest`, `infra`, `ci`.
+## Dueños de cada carpeta
 
-Ejemplos: `feat(cart): reserva de stock por 15 minutos`, `fix(infra): rotación de logs de caddy`.
-Un cambio que rompe un contrato lleva `!` (`feat(api)!: ...`) y explica la migración en el cuerpo.
+| Carpeta | Dueño | Revisa también |
+| --- | --- | --- |
+| `backend/` | Equipo backend | — |
+| `infra/`, `.github/` | Equipo servidor | — |
+| `docs/openapi.yaml` | Backend | Frontend |
+| `docs/contracts/` | Backend | Scraping debe aprobar |
+| `docs/data-model.md` | Backend | Base de datos debe aprobar |
+| `frontend/`, `scraper/` | Otros equipos | — |
 
-## Pull requests
+## Convenciones de código
 
-- Pequeños y de un solo tema. Describir qué cambia, cómo se probó y si toca variables de entorno o contratos.
-- Si agregas una variable de entorno, actualiza `.env.example` y avisa a infra.
-- No subir `.env`, llaves ni datos reales de clientes.
+- **Idioma:** código (variables, funciones) en inglés; comentarios, mensajes de error al usuario y documentación en español.
+- **API:** JSON en `snake_case`, montos como texto decimal (`"18999.00"`), moneda MXN, fechas ISO 8601 en UTC.
+- **Errores:** `{ "error": { "code": "STOCK_INSUFICIENTE", "message": "...", "details": {} } }`.
+- **Paginación:** `?page=1&limit=20` → `{ "data": [...], "meta": { "page", "limit", "total" } }`.
+- **Backend:** JavaScript CommonJS con JSDoc, un módulo por carpeta en `backend/src/modules/<modulo>/` con `routes`, `controller`, `service`, `model`, `validators`.
+- **Secretos:** nunca en el repo. Solo `.env.example` con valores de ejemplo.
 
-## Entorno local
+## Antes de abrir un PR
 
-Ver `infra/README.md`. Resumen: `cp .env.example .env`, generar `MONGO_REPLICA_KEY` y `docker compose up -d`.
+```bash
+# backend
+cd backend && npm run lint && npm test
+```

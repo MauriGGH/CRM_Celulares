@@ -1,11 +1,13 @@
-# Caddy: HTTPS automático (Let's Encrypt), SPA del frontend y proxy a la API.
-# SITE_ADDRESS = dominio real en staging/producción (p. ej. tienda.ejemplo.mx);
-# ":80" en local, sin certificado.
+# DOMAIN=localhost en local (certificado interno). En la Raspberry Pi DOMAIN=":80":
+# Caddy escucha HTTP plano detrás de Cloudflare Tunnel, que pone el HTTPS.
+# INGEST_HOST (p. ej. ingest.<dominio>) es el único hostname por el que se acepta
+# /internal/v1/ingest/*; Cloudflare Access lo protege con un Service Token.
+# EXTERNAL_HOST (p. ej. api.<dominio>) solo expone /external/* (API de exportación).
 {
 	email {$ACME_EMAIL:admin@example.com}
 }
 
-{$SITE_ADDRESS::80} {
+{$DOMAIN} {
 	encode zstd gzip
 
 	log {
@@ -21,25 +23,58 @@
 		-Server
 	}
 
-	# Las rutas internas (ingesta del scraper) solo se usan dentro de la red de
-	# Docker (http://api:3001/internal/...). Desde internet no existen.
-	# Va primero: los bloques handle son excluyentes y este debe ganar.
+	# Hostname de la API externa: solo /external/*, nada más.
+	@external_host host {$EXTERNAL_HOST:external.invalid}
+	handle @external_host {
+		@external path /external/*
+		handle @external {
+			reverse_proxy api:3001 {
+				flush_interval -1
+			}
+		}
+		respond 404
+	}
+
+	# Hostname de ingesta: solo expone el endpoint del scraping, nada más.
+	@ingest_host host {$INGEST_HOST:ingest.invalid}
+	handle @ingest_host {
+		@ingest path /internal/v1/ingest/*
+		handle @ingest {
+			reverse_proxy api:3001
+		}
+		respond 404
+	}
+
+	# En cualquier otro hostname la API interna no existe hacia Internet.
+	# Tiene que ser un bloque handle y estar antes que los demás: un "respond"
+	# suelto pierde contra el handle del frontend y /internal/* acabaría sirviendo index.html.
 	@internal path /internal /internal/* /api/internal/* /api/v1/internal/*
 	handle @internal {
-		respond 404
+		respond 403
+	}
+
+	# API de exportación para sistemas externos (B15, /external/v1, con API key).
+	# Se sirve en el host principal y en EXTERNAL_HOST (p. ej. api.<dominio>);
+	# flush_interval -1: las descargas grandes salen en streaming sin búfer.
+	handle /external/* {
+		reverse_proxy api:3001 {
+			flush_interval -1
+		}
 	}
 
 	handle /api/* {
 		reverse_proxy api:3001
 	}
 
-	handle /media/* {
-		reverse_proxy api:3001
+	# Imágenes de productos (volumen media-data en la Pi)
+	handle_path /media/* {
+		root * /srv/media
+		file_server
 	}
 
-	# SPA: cualquier otra ruta cae en index.html para que React Router la resuelva.
+	# Frontend compilado (lo entrega el equipo de frontend en frontend/dist)
 	handle {
-		root * /srv
+		root * /srv/frontend
 		try_files {path} /index.html
 		file_server
 	}
