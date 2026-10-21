@@ -1,0 +1,113 @@
+# Construye la imagen del backend (arm64 para la Raspberry Pi y amd64 para
+# desarrollo), la publica en GHCR y despliega con el runner instalado en la Pi (S7).
+#   push a develop  -> staging     (APP_DIR /opt/crm-staging)
+#   tag v*          -> producción  (APP_DIR /opt/crm; requiere aprobación en el environment)
+# El runner de la Pi solo corre este workflow (push/tag/manual), nunca código de PRs.
+name: Deploy
+
+on:
+  push:
+    branches: [develop]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "staging o production"
+        required: true
+        default: production
+        type: choice
+        options: [staging, production]
+
+concurrency:
+  group: deploy-${{ github.event.inputs.environment || (startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging') }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/mauriggh/crm-celulares-backend
+
+jobs:
+  image:
+    name: Build y push a GHCR (arm64 + amd64)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          platforms: linux/arm64,linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+  frontend:
+    name: Build del frontend
+    runs-on: ubuntu-latest
+    # El frontend lo desarrolla otro equipo; este job se activa cuando exista frontend/package.json.
+    if: hashFiles('frontend/package.json') != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: frontend
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 7
+
+  deploy:
+    name: Deploy a ${{ github.event.inputs.environment || (startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging') }}
+    needs: [image, frontend]
+    # Corre aunque el job de frontend se haya saltado (todavía sin frontend).
+    if: ${{ !cancelled() && needs.image.result == 'success' && needs.frontend.result != 'failure' }}
+    runs-on: [self-hosted, linux, ARM64, crm-pi]
+    environment: ${{ github.event.inputs.environment || (startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging') }}
+    permissions:
+      contents: read
+      packages: read
+    env:
+      APP_DIR: ${{ vars.APP_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copiar infra/ (sin secrets/)
+        run: |
+          test -n "$APP_DIR" || { echo "Define la variable APP_DIR en el environment"; exit 1; }
+          rsync -a --delete --exclude 'secrets/' infra/ "$APP_DIR/infra/"
+      - name: Bajar build del frontend
+        if: needs.frontend.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend-dist
+      - name: Copiar frontend/dist
+        if: needs.frontend.result == 'success'
+        run: rsync -a --delete frontend-dist/ "$APP_DIR/frontend/dist/"
+      - name: Login a GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Desplegar
+        run: bash "$APP_DIR/infra/scripts/deploy.sh" "${{ needs.image.outputs.tag }}"

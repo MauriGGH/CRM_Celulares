@@ -8,7 +8,8 @@ name: crm-celulares
 
 services:
   mongo:
-    image: mongo:8.0
+    # Misma versión que la Raspberry Pi 4 (mongo:4.4.18) para no usar funciones de 5.0+.
+    image: ${MONGO_IMAGE:-mongo:4.4.18}
     # Replica set de un nodo: MongoDB solo permite transacciones en replica set.
     command: ["--replSet", "rs0", "--bind_ip_all"]
     ports:
@@ -16,24 +17,28 @@ services:
     volumes:
       - mongo-data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      # mongo:4.4 trae "mongo"; mongo:5+ trae "mongosh".
+      test: ["CMD-SHELL", "S=$$(command -v mongosh || command -v mongo); $$S --quiet --eval \"db.adminCommand('ping').ok\" | grep -q 1"]
       interval: 10s
       timeout: 5s
       retries: 10
 
   mongo-init:
-    image: mongo:8.0
+    image: ${MONGO_IMAGE:-mongo:4.4.18}
     depends_on:
       mongo:
         condition: service_healthy
     restart: "no"
     entrypoint:
-      - mongosh
-      - --host
-      - mongo:27017
-      - --quiet
-      - --eval
-      - "try { rs.status() } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }) }"
+      - sh
+      - -c
+      - |
+        S=$$(command -v mongosh || command -v mongo)
+        exec $$S --host mongo:27017 --quiet --eval "
+          var st; try { st = rs.status() } catch (e) { st = { ok: 0 } }
+          if (st.ok !== 1) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }) }
+          while (!db.isMaster().ismaster) { sleep(500) }
+          print('replica set listo')"
 
   redis:
     image: redis:7-alpine

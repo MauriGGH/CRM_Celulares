@@ -1,63 +1,125 @@
-# Override para staging y producción (en nuestro VPS):
+# Override para staging y producción (Raspberry Pi 5 arm64 detrás de Cloudflare Tunnel):
 #   docker compose -f infra/docker-compose.yml -f infra/docker-compose.prod.yml --env-file .env up -d
 # - MongoDB con autenticación y keyFile (requerido por replica set + auth).
 #   Generar el keyFile una vez en el servidor (lo hace scripts/provision.sh):
 #     openssl rand -base64 756 > infra/secrets/mongo-keyfile && chmod 400 infra/secrets/mongo-keyfile
 #     sudo chown 999:999 infra/secrets/mongo-keyfile
-# - api y worker usan las imágenes publicadas en GHCR (IMAGE_TAG la fija el deploy).
+# - api y worker: con infra/scripts/pi-deploy.sh (git pull) la imagen se construye en la Pi;
+#   con el workflow deploy.yml se baja de GHCR (IMAGE_TAG la fija deploy.sh).
 services:
   mongo:
-    command: ["--replSet", "rs0", "--bind_ip_all", "--auth", "--keyFile", "/etc/mongo/keyfile", "--wiredTigerCacheSizeGB", "1"]
-    ports: !reset []
+    # Raspberry Pi 4: MONGO_IMAGE=mongo:4.4.18 (lo más nuevo que corre sin ARMv8.2-A).
+    # Pi 5 o x86: mongo:8.0.
+    image: ${MONGO_IMAGE:-mongo:8.0}
+    command: ["--replSet", "rs0", "--bind_ip_all", "--auth", "--keyFile", "/etc/mongo/keyfile", "--wiredTigerCacheSizeGB", "${MONGO_CACHE_GB:-1}"]
+    mem_limit: ${MONGO_MEM_LIMIT:-2g}
+    # Solo loopback de la Pi: el equipo de DB entra por túnel SSH
+    # (ssh -L 27017:127.0.0.1:27017 deploy@raspberry). Nunca abrir 27017 a Internet.
+    ports: !override
+      - "127.0.0.1:${MONGO_LOCAL_PORT:-27017}:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
     volumes:
       - mongo-data:/data/db
       - ./secrets/mongo-keyfile:/etc/mongo/keyfile:ro
+    # mongo:4.4 trae el shell "mongo"; mongo:5+ trae "mongosh". Se usa el que exista.
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "-u", "${MONGO_ROOT_USER}", "-p", "${MONGO_ROOT_PASSWORD}", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping').ok"]
+      test: ["CMD-SHELL", "S=$$(command -v mongosh || command -v mongo); $$S --quiet -u \"$$MONGO_INITDB_ROOT_USERNAME\" -p \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep -q 1"]
     logging: &logging
       driver: json-file
       options: { max-size: "10m", max-file: "5" }
 
   mongo-init:
     # Inicia el replica set y crea el usuario de la aplicación (idempotente).
+    # Compatible con el shell "mongo" (4.4) y "mongosh" (5+).
+    image: ${MONGO_IMAGE:-mongo:8.0}
+    environment:
+      MONGO_ROOT_USER: ${MONGO_ROOT_USER}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
     entrypoint: !override
-      - mongosh
-      - --host
-      - mongo:27017
-      - -u
-      - ${MONGO_ROOT_USER}
-      - -p
-      - ${MONGO_ROOT_PASSWORD}
-      - --authenticationDatabase
-      - admin
-      - --quiet
-      - --eval
-      - >-
-        try { rs.status() } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }); sleep(3000) }
-        const app = db.getSiblingDB('crm_celulares');
-        if (!app.getUser('${MONGO_APP_USER}')) {
-          app.createUser({ user: '${MONGO_APP_USER}', pwd: '${MONGO_APP_PASSWORD}', roles: [{ role: 'readWrite', db: 'crm_celulares' }] })
-        }
+      - sh
+      - -c
+      - |
+        S=$$(command -v mongosh || command -v mongo)
+        exec $$S --host mongo:27017 -u "$$MONGO_ROOT_USER" -p "$$MONGO_ROOT_PASSWORD" --authenticationDatabase admin --quiet --eval "
+          var st; try { st = rs.status() } catch (e) { st = { ok: 0 } }
+          if (st.ok !== 1) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }) }
+          while (!db.isMaster().ismaster) { sleep(500) }
+          var app = db.getSiblingDB('${MONGO_DB_NAME:-crm_celulares}');
+          if (!app.getUser('${MONGO_APP_USER}')) {
+            app.createUser({ user: '${MONGO_APP_USER}', pwd: '${MONGO_APP_PASSWORD}', roles: [{ role: 'readWrite', db: '${MONGO_DB_NAME:-crm_celulares}' }] })
+          }
+          print('mongo-init listo')"
 
   api:
-    image: ghcr.io/mauriggh/crm-celulares-backend:${IMAGE_TAG:-latest}
-    build: !reset null
+    image: ghcr.io/mauriggh/crm-celulares-backend:${IMAGE_TAG:-local}
     environment:
       NODE_ENV: production
+      MEDIA_DIR: /app/media
+    volumes:
+      - media-data:/app/media
+    mem_limit: ${API_MEM_LIMIT:-512m}
     logging: *logging
 
   worker:
-    image: ghcr.io/mauriggh/crm-celulares-backend:${IMAGE_TAG:-latest}
-    build: !reset null
+    image: ghcr.io/mauriggh/crm-celulares-backend:${IMAGE_TAG:-local}
     environment:
       NODE_ENV: production
+      MEDIA_DIR: /app/media
+    volumes:
+      - media-data:/app/media
+    mem_limit: ${WORKER_MEM_LIMIT:-512m}
     logging: *logging
 
   redis:
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "200mb", "--maxmemory-policy", "noeviction"]
+    mem_limit: 256m
     logging: *logging
 
+  # Detrás del túnel Caddy sirve HTTP plano: Cloudflare termina el HTTPS.
+  # No se publican 80/443 en el router; solo loopback para pruebas desde la Pi.
   caddy:
+    environment:
+      DOMAIN: ":80"
+      INGEST_HOST: ${INGEST_HOST:-ingest.invalid}
+      EXTERNAL_HOST: ${EXTERNAL_HOST:-external.invalid}
+    volumes:
+      - media-data:/srv/media:ro
+    mem_limit: 128m
+    ports: !override
+      - "127.0.0.1:${HTTP_LOCAL_PORT:-8080}:80"
     logging: *logging
+
+  # Cloudflare Tunnel: conexión saliente de la Pi a Cloudflare. El hostname
+  # público (p. ej. tienda.<dominio> -> http://caddy:80) se configura en el
+  # panel Zero Trust del túnel; aquí solo va su token.
+  cloudflared:
+    image: cloudflare/cloudflared:2025.8.1
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?falta TUNNEL_TOKEN}
+    depends_on:
+      - caddy
+    restart: unless-stopped
+    mem_limit: 128m
+    logging: *logging
+
+  # Monitoreo de /api/v1/health y alertas (S9). Solo escucha en localhost:
+  # se entra con ssh -L 3002:127.0.0.1:3002 deploy@raspberry. Se activa con
+  # COMPOSE_PROFILES=monitoring en el .env del servidor.
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    volumes:
+      - kuma-data:/app/data
+    ports:
+      - "127.0.0.1:3002:3001"
+    mem_limit: 256m
+    logging: *logging
+
+volumes:
+  kuma-data:
+  # Imágenes de productos: la API escribe, Caddy sirve /media/*. Entra en los respaldos (backup.sh).
+  media-data:
