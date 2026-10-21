@@ -1,6 +1,6 @@
 /**
  * Autenticación servicio a servicio para /internal/*.
- * El scraper envía `Authorization: Bearer <INGEST_SERVICE_TOKEN>`.
+ * El scraper envía `Authorization: Bearer <INGEST_API_KEY>`.
  * Caddy además bloquea /internal desde Internet.
  */
 const crypto = require('crypto');

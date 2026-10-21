@@ -1,22 +1,31 @@
 openapi: 3.1.0
 info:
   title: CRM Celulares API
-  version: 0.1.0
-  description: |
-    Contrato entre backend y frontend. Esqueleto inicial: el equipo backend (tarea B1)
-    completa los esquemas de cada endpoint antes de implementarlo.
-    Convenciones: JSON snake_case, montos como texto decimal, moneda MXN, fechas ISO 8601 UTC.
+  version: 1.0.0
+  description: |-
+    Contrato entre backend y frontend (B1). Implementado en backend/src/modules.
+
+    Convenciones:
+    - JSON snake_case; ids como texto (`id`); montos como texto decimal en MXN (`"18999.00"`); fechas ISO 8601 UTC.
+    - Autenticación: `Authorization: Bearer <access_token>`. El refresh token vive en la cookie httpOnly `refresh_token`; usar `credentials: 'include'` en /auth/*.
+    - Listas paginadas: `?page=&limit=` → `{ data, meta: { page, limit, total } }`.
+    - Errores: `{ error: { code, message, details } }`.
+
+    Códigos de error frecuentes: VALIDACION (422), NO_AUTENTICADO (401), ACCESO_DENEGADO (403), NO_ENCONTRADO (404), DUPLICADO (409),
+    STOCK_INSUFICIENTE, CARRITO_VACIO, CARRITO_INVALIDO, TRANSICION_INVALIDA, PEDIDO_NO_PAGABLE, RESERVA_VENCIDA, PAGO_DE_OTRO_PEDIDO (409),
+    CUPON_INVALIDO, CUPON_NO_APLICA, IDEMPOTENCY_KEY_REUTILIZADA (422), DEMASIADOS_INTENTOS (429), PAGO_NO_DISPONIBLE (503), PROVEEDOR_ERROR (502).
 servers:
-  - url: /api/v1
+- url: /api/v1
 tags:
-  - name: health
-  - name: auth
-  - name: catalog
-  - name: cart
-  - name: checkout
-  - name: orders
-  - name: admin
-  - name: ingest
+- name: health
+- name: auth
+- name: users
+- name: catalog
+- name: cart
+- name: checkout
+- name: orders
+- name: admin
+- name: ingest
 components:
   securitySchemes:
     bearer:
@@ -26,101 +35,862 @@ components:
     serviceToken:
       type: http
       scheme: bearer
-      description: INGEST_SERVICE_TOKEN, solo para /internal/*
+      description: INGEST_API_KEY (alias INGEST_SERVICE_TOKEN), solo para /internal/*
   parameters:
-    page: { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
-    limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+    page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    id:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Id'
+    sku:
+      name: sku
+      in: path
+      required: true
+      schema:
+        type: string
+    provider:
+      name: provider
+      in: path
+      required: true
+      schema:
+        enum:
+        - mercadopago
+        - paypal
+    idempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 200
+      description: Recomendada. La misma llave con el mismo cuerpo repite la respuesta original (24 h); con otro cuerpo responde 422 IDEMPOTENCY_KEY_REUTILIZADA.
+    desde:
+      name: desde
+      in: query
+      schema:
+        type: string
+        format: date-time
+    hasta:
+      name: hasta
+      in: query
+      schema:
+        type: string
+        format: date-time
   schemas:
     Error:
       type: object
-      required: [error]
+      required:
+      - error
       properties:
         error:
           type: object
-          required: [code, message]
+          required:
+          - code
+          - message
           properties:
-            code: { type: string, examples: [STOCK_INSUFICIENTE] }
-            message: { type: string }
-            details: { type: object }
+            code:
+              type: string
+              examples:
+              - STOCK_INSUFICIENTE
+            message:
+              type: string
+            details:
+              type: object
     PageMeta:
       type: object
       properties:
-        page: { type: integer }
-        limit: { type: integer }
-        total: { type: integer }
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
     Money:
       type: string
-      pattern: '^[0-9]+\.[0-9]{2}$'
-      examples: ['18999.00']
+      pattern: ^[0-9]+\.[0-9]{2}$
+      examples:
+      - '18999.00'
+      description: Monto en MXN como texto con 2 decimales. Nunca como número.
     Variant:
       type: object
       properties:
-        sku: { type: string }
-        color: { type: string }
-        almacenamiento_gb: { type: integer }
-        ram_gb: { type: integer }
-        precio: { $ref: '#/components/schemas/Money' }
-        precio_antes: { $ref: '#/components/schemas/Money' }
-        disponible: { type: boolean }
+        sku:
+          type: string
+        color:
+          type: string
+        almacenamiento_gb:
+          type: integer
+        ram_gb:
+          type: integer
+        precio:
+          $ref: '#/components/schemas/Money'
+        precio_antes:
+          $ref: '#/components/schemas/Money'
+        disponible:
+          type: boolean
+        images:
+          type: array
+          items:
+            type: string
+        gtin:
+          type:
+          - string
+          - 'null'
     ProductSummary:
       type: object
       properties:
-        id: { type: string }
-        slug: { type: string }
-        marca: { type: string }
-        modelo: { type: string }
-        condicion: { enum: [nuevo, reacondicionado, usado] }
-        precio_desde: { $ref: '#/components/schemas/Money' }
-        imagen: { type: string, format: uri }
+        id:
+          type: string
+        slug:
+          type: string
+        marca:
+          type: string
+        modelo:
+          type: string
+        condicion:
+          enum:
+          - nuevo
+          - reacondicionado
+          - usado
+        precio_desde:
+          $ref: '#/components/schemas/Money'
+        imagen:
+          type: string
+          format: uri
+        disponible:
+          type: boolean
     Product:
       allOf:
-        - $ref: '#/components/schemas/ProductSummary'
-        - type: object
+      - $ref: '#/components/schemas/ProductSummary'
+      - type: object
+        properties:
+          descripcion:
+            type: string
+          garantia_meses:
+            type: integer
+          specs:
+            type: object
+          images:
+            type: array
+            items:
+              type: string
+              format: uri
+          variants:
+            type: array
+            items:
+              $ref: '#/components/schemas/Variant'
+    Id:
+      type: string
+      pattern: ^[0-9a-f]{24}$
+    Page:
+      type: object
+      properties:
+        data:
+          type: array
+          items: {}
+        meta:
+          $ref: '#/components/schemas/PageMeta'
+    Address:
+      type: object
+      required:
+      - nombre_destinatario
+      - calle
+      - ciudad
+      - estado
+      - cp
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        nombre_destinatario:
+          type: string
+        calle:
+          type: string
+        numero:
+          type: string
+        colonia:
+          type: string
+        ciudad:
+          type: string
+        estado:
+          type: string
+        cp:
+          type: string
+          pattern: ^[0-9]{5}$
+        telefono:
+          type: string
+        referencias:
+          type: string
+        es_principal:
+          type: boolean
+    User:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        email:
+          type: string
+          format: email
+        nombre:
+          type: string
+        telefono:
+          type: string
+        rol:
+          enum:
+          - admin
+          - gerente
+          - almacen
+          - cliente
+        is_active:
+          type: boolean
+    AuthTokens:
+      type: object
+      properties:
+        access_token:
+          type: string
+        token_type:
+          const: Bearer
+        expires_in:
+          type: integer
+          description: segundos (15 min clientes, 8 h staff)
+        user:
+          $ref: '#/components/schemas/User'
+      description: El refresh token viaja solo en la cookie httpOnly `refresh_token` (path /api/v1/auth).
+    CartLine:
+      type: object
+      properties:
+        sku:
+          type: string
+        descripcion:
+          type: string
+        cantidad:
+          type: integer
+        precio_unitario:
+          $ref: '#/components/schemas/Money'
+        subtotal:
+          $ref: '#/components/schemas/Money'
+        descuento:
+          $ref: '#/components/schemas/Money'
+        disponible:
+          type: integer
+          description: unidades disponibles
+        stock_suficiente:
+          type: boolean
+        product_id:
+          type: string
+        slug:
+          type: string
+        imagen:
+          type:
+          - string
+          - 'null'
+    Cart:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CartLine'
+        subtotal:
+          $ref: '#/components/schemas/Money'
+        descuento:
+          $ref: '#/components/schemas/Money'
+        envio:
+          $ref: '#/components/schemas/Money'
+        total:
+          $ref: '#/components/schemas/Money'
+        cupon:
+          type:
+          - string
+          - 'null'
+        promocion:
+          type:
+          - object
+          - 'null'
+        promociones_elegibles:
+          type: array
+          items:
+            type: object
+        skus_no_disponibles:
+          type: array
+          items:
+            type: string
+          description: SKU que ya no están a la venta
+    OrderItem:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        sku:
+          type: string
+        nombre:
+          type: string
+        cantidad:
+          type: integer
+        precio_unitario:
+          $ref: '#/components/schemas/Money'
+        descuento:
+          $ref: '#/components/schemas/Money'
+        subtotal:
+          $ref: '#/components/schemas/Money'
+        imeis:
+          type: array
+          items:
+            type: string
+            pattern: ^[0-9]{15}$
+    Order:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        folio:
+          type: string
+          examples:
+          - CEL-2026-000001
+        estado:
+          enum: &id001
+          - pendiente_pago
+          - pagado
+          - preparando
+          - enviado
+          - entregado
+          - cancelado
+          - reembolsado
+        canal:
+          const: online
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        subtotal:
+          $ref: '#/components/schemas/Money'
+        descuento:
+          $ref: '#/components/schemas/Money'
+        envio:
+          $ref: '#/components/schemas/Money'
+        total:
+          $ref: '#/components/schemas/Money'
+        shipping_address:
+          $ref: '#/components/schemas/Address'
+        reservado_hasta:
+          type: string
+          format: date-time
+        shipment:
+          type:
+          - object
+          - 'null'
           properties:
-            descripcion: { type: string }
-            garantia_meses: { type: integer }
-            specs: { type: object }
-            images: { type: array, items: { type: string, format: uri } }
-            variants: { type: array, items: { $ref: '#/components/schemas/Variant' } }
+            paqueteria:
+              type: string
+            guia:
+              type: string
+            estado:
+              type: string
+            enviado_en:
+              type: string
+              format: date-time
+        status_history:
+          type: array
+          items:
+            type: object
+            properties:
+              estado:
+                enum: *id001
+              nota:
+                type: string
+              created_at:
+                type: string
+                format: date-time
+        returns:
+          type: array
+          items:
+            $ref: '#/components/schemas/Return'
+        created_at:
+          type: string
+          format: date-time
+    Return:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        order_id:
+          type: string
+        order_item_id:
+          type: string
+        sku:
+          type: string
+        imei:
+          type:
+          - string
+          - 'null'
+        cantidad:
+          type: integer
+        tipo:
+          enum:
+          - devolucion
+          - garantia
+        estado:
+          enum:
+          - solicitada
+          - aprobada
+          - rechazada
+          - recibida
+          - reembolsada
+        motivo:
+          type: string
+        resolucion:
+          type: string
+    Modelo:
+      type: object
+      description: Ficha de crm_celulares.modelos normalizada
+      properties:
+        id:
+          type: string
+        ref:
+          type:
+          - integer
+          - 'null'
+        marca:
+          type: string
+        modelo:
+          type: string
+        almacenamiento_gb:
+          type: array
+          items:
+            type: integer
+        ram_gb:
+          type: array
+          items:
+            type: integer
+        precio_referencia:
+          type:
+          - object
+          - 'null'
+          properties:
+            monto:
+              type: string
+            moneda:
+              type:
+              - string
+              - 'null'
+        imagen:
+          type:
+          - string
+          - 'null'
+        url_fuente:
+          type:
+          - string
+          - 'null'
+        specs:
+          type: object
+    ApiClient:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        nombre:
+          type: string
+        prefix:
+          type: string
+        scopes:
+          type: array
+          items:
+            enum: &id007
+            - catalog:read
+            - stock:read
+            - prices:read
+            - sales:read
+        limite_por_minuto:
+          type: integer
+        vence_en:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        activo:
+          type: boolean
+        ultimo_uso_en:
+          type:
+          - string
+          - 'null'
+          format: date-time
   responses:
     Error:
       description: Error estándar
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/Error' }
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadRequest:
+      description: Solicitud mal formada
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: 'NO_AUTENTICADO: falta token o venció'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: 'ACCESO_DENEGADO: el rol no alcanza'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: NO_ENCONTRADO
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Conflicto de estado (ver code)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Validation:
+      description: 'VALIDACION: details.errors lista campo y motivo'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooMany:
+      description: DEMASIADOS_INTENTOS (rate limit)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
 paths:
   /health:
     get:
-      tags: [health]
+      tags:
+      - health
       summary: Estado de la API y de MongoDB
       responses:
-        '200': { description: OK }
-        '503': { description: MongoDB desconectado }
+        '200':
+          description: OK
+        '503':
+          description: MongoDB desconectado
   /auth/register:
-    post: { tags: [auth], summary: Registro de cliente, responses: { '201': { description: Creado }, '422': { $ref: '#/components/responses/Error' } } }
+    post:
+      tags:
+      - auth
+      summary: Registro de cliente
+      description: 409 EMAIL_REGISTRADO si el correo ya existe.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+                nombre:
+                  type: string
+                telefono:
+                  type: string
+              required:
+              - email
+              - password
+              - nombre
+      responses:
+        '201':
+          description: Creado; pone la cookie refresh_token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokens'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '429':
+          $ref: '#/components/responses/TooMany'
   /auth/login:
-    post: { tags: [auth], summary: Login (staff y clientes), responses: { '200': { description: Token de acceso y cookie de refresh }, '401': { $ref: '#/components/responses/Error' } } }
+    post:
+      tags:
+      - auth
+      summary: Login (staff y clientes)
+      description: Máximo 5 intentos por minuto por IP (CF-Connecting-IP).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+              required:
+              - email
+              - password
+      responses:
+        '200':
+          description: Token de acceso y cookie refresh_token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokens'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '429':
+          $ref: '#/components/responses/TooMany'
   /auth/refresh:
-    post: { tags: [auth], summary: Renueva el token de acceso con la cookie httpOnly, responses: { '200': { description: OK } } }
+    post:
+      tags:
+      - auth
+      summary: Rota el refresh token (cookie) y entrega un access token nuevo
+      description: Reusar un refresh token ya rotado revoca todas las sesiones del usuario.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokens'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /auth/logout:
-    post: { tags: [auth], summary: Cierra sesión, responses: { '204': { description: OK } } }
+    post:
+      tags:
+      - auth
+      summary: Revoca el refresh token y borra la cookie
+      responses:
+        '204':
+          description: OK
   /auth/me:
-    get: { tags: [auth], security: [{ bearer: [] }], summary: Usuario actual, responses: { '200': { description: OK } } }
+    get:
+      tags:
+      - auth
+      summary: Usuario del token vigente
+      security:
+      - bearer: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /me:
+    get:
+      tags:
+      - users
+      summary: Perfil propio
+      security:
+      - bearer: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      tags:
+      - users
+      summary: Actualiza nombre, teléfono o contraseña
+      security:
+      - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre:
+                  type: string
+                telefono:
+                  type: string
+                password:
+                  type: string
+                  minLength: 8
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /me/addresses:
+    get:
+      tags:
+      - users
+      summary: Direcciones del cliente
+      security:
+      - bearer: []
+      description: 'Roles: cliente.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Address'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - users
+      summary: Agrega dirección
+      security:
+      - bearer: []
+      description: 'Roles: cliente.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Address'
+      responses:
+        '201':
+          description: Creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /me/addresses/{id}:
+    patch:
+      tags:
+      - users
+      summary: Edita dirección
+      security:
+      - bearer: []
+      description: 'Roles: cliente.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Address'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      tags:
+      - users
+      summary: Borra dirección
+      security:
+      - bearer: []
+      description: 'Roles: cliente.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      responses:
+        '204':
+          description: OK
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /products:
     get:
-      tags: [catalog]
+      tags:
+      - catalog
       summary: Catálogo público con filtros
       parameters:
-        - $ref: '#/components/parameters/page'
-        - $ref: '#/components/parameters/limit'
-        - { name: q, in: query, schema: { type: string } }
-        - { name: brand, in: query, schema: { type: string }, description: slug de marca }
-        - { name: category, in: query, schema: { type: string } }
-        - { name: min_price, in: query, schema: { type: number } }
-        - { name: max_price, in: query, schema: { type: number } }
-        - { name: storage_gb, in: query, schema: { type: integer } }
-        - { name: condition, in: query, schema: { enum: [nuevo, reacondicionado, usado] } }
-        - { name: sort, in: query, schema: { enum: [precio_asc, precio_desc, recientes] } }
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/limit'
+      - name: q
+        in: query
+        schema:
+          type: string
+      - name: brand
+        in: query
+        schema:
+          type: string
+        description: slug de marca
+      - name: category
+        in: query
+        schema:
+          type: string
+      - name: min_price
+        in: query
+        schema:
+          type: number
+      - name: max_price
+        in: query
+        schema:
+          type: number
+      - name: storage_gb
+        in: query
+        schema:
+          type: integer
+      - name: condition
+        in: query
+        schema:
+          enum:
+          - nuevo
+          - reacondicionado
+          - usado
+      - name: sort
+        in: query
+        schema:
+          enum:
+          - precio_asc
+          - precio_desc
+          - recientes
       responses:
         '200':
           description: OK
@@ -129,80 +899,2785 @@ paths:
               schema:
                 type: object
                 properties:
-                  data: { type: array, items: { $ref: '#/components/schemas/ProductSummary' } }
-                  meta: { $ref: '#/components/schemas/PageMeta' }
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProductSummary'
+                  meta:
+                    $ref: '#/components/schemas/PageMeta'
   /products/{slug}:
     get:
-      tags: [catalog]
-      parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+      tags:
+      - catalog
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
       responses:
-        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Product' } } } }
-        '404': { $ref: '#/components/responses/Error' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          $ref: '#/components/responses/Error'
   /brands:
-    get: { tags: [catalog], summary: Marcas, responses: { '200': { description: OK } } }
+    get:
+      tags:
+      - catalog
+      summary: Marcas
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
   /categories:
-    get: { tags: [catalog], summary: Categorías, responses: { '200': { description: OK } } }
+    get:
+      tags:
+      - catalog
+      summary: Categorías
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
   /cart:
-    get: { tags: [cart], security: [{ bearer: [] }], summary: Carrito del cliente, responses: { '200': { description: OK } } }
+    get:
+      tags:
+      - cart
+      summary: Carrito con precios y promociones recalculados
+      security:
+      - bearer: []
+      description: 'Roles: cliente.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /cart/items:
-    post: { tags: [cart], security: [{ bearer: [] }], summary: Agrega un SKU, responses: { '200': { description: OK }, '409': { $ref: '#/components/responses/Error' } } }
-  /cart/items/{sku}:
-    patch: { tags: [cart], security: [{ bearer: [] }], summary: Cambia cantidad, parameters: [{ name: sku, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
-    delete: { tags: [cart], security: [{ bearer: [] }], summary: Quita un SKU, parameters: [{ name: sku, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
-  /cart/coupon:
-    post: { tags: [cart], security: [{ bearer: [] }], summary: Aplica un cupón, responses: { '200': { description: OK }, '422': { $ref: '#/components/responses/Error' } } }
-  /checkout:
-    post: { tags: [checkout], security: [{ bearer: [] }], summary: Crea pedido pendiente_pago y reserva stock 15 min, parameters: [{ name: Idempotency-Key, in: header, required: true, schema: { type: string } }], responses: { '201': { description: Pedido creado }, '409': { $ref: '#/components/responses/Error' } } }
-  /payments/{provider}/create:
-    post: { tags: [checkout], security: [{ bearer: [] }], parameters: [{ name: provider, in: path, required: true, schema: { enum: [paypal, mercadopago] } }], responses: { '200': { description: Orden del proveedor } } }
-  /payments/{provider}/capture:
-    post: { tags: [checkout], security: [{ bearer: [] }], parameters: [{ name: provider, in: path, required: true, schema: { enum: [paypal, mercadopago] } }], responses: { '200': { description: Pago capturado } } }
-  /webhooks/{provider}:
-    post: { tags: [checkout], summary: Webhook firmado del proveedor, parameters: [{ name: provider, in: path, required: true, schema: { enum: [paypal, mercadopago] } }], responses: { '200': { description: OK } } }
-  /orders:
-    get: { tags: [orders], security: [{ bearer: [] }], summary: Pedidos del cliente, responses: { '200': { description: OK } } }
-  /orders/{id}:
-    get: { tags: [orders], security: [{ bearer: [] }], parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
-  /admin/products:
-    get: { tags: [admin], security: [{ bearer: [] }], summary: Lista de productos (gerente), responses: { '200': { description: OK } } }
-    post: { tags: [admin], security: [{ bearer: [] }], summary: Crea producto con variantes, responses: { '201': { description: OK } } }
-  /admin/stock/movements:
-    post: { tags: [admin], security: [{ bearer: [] }], summary: Registra entrada, ajuste o traspaso, responses: { '201': { description: OK } } }
-  /admin/serials:
-    post: { tags: [admin], security: [{ bearer: [] }], summary: Alta de IMEI en lote, responses: { '201': { description: OK } } }
-  /admin/orders/{id}/status:
-    patch: { tags: [admin], security: [{ bearer: [] }], parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
-  /admin/reports/sales:
-    get: { tags: [admin], security: [{ bearer: [] }], responses: { '200': { description: OK } } }
-  /admin/ingest/records:
-    get: { tags: [admin], security: [{ bearer: [] }], summary: Cola de revisión de la ingesta, parameters: [{ name: resultado, in: query, schema: { enum: [nuevo, conflicto, invalido] } }], responses: { '200': { description: OK } } }
-  /admin/ingest/records/{id}/approve:
-    post: { tags: [admin], security: [{ bearer: [] }], parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
-  /admin/competitor-prices:
-    get: { tags: [admin], security: [{ bearer: [] }], parameters: [{ name: sku, in: query, schema: { type: string } }], responses: { '200': { description: Histórico de precios } } }
-  /internal/v1/ingest/batches:
-    servers: [{ url: / }]
     post:
-      tags: [ingest]
-      summary: Recibe un lote del scraper (solo red interna)
-      security: [{ serviceToken: [] }]
-      parameters: [{ name: Idempotency-Key, in: header, required: true, schema: { type: string } }]
+      tags:
+      - cart
+      summary: Agrega un SKU (suma a lo que ya hay)
+      description: |-
+        409 STOCK_INSUFICIENTE o LIMITE_POR_PRODUCTO.
+
+        Roles: cliente.
+      security:
+      - bearer: []
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: './contracts/ingest-batch.schema.json' }
+            schema:
+              type: object
+              properties:
+                sku:
+                  type: string
+                cantidad:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+              required:
+              - sku
+              - cantidad
       responses:
-        '202': { description: Lote en cola, content: { application/json: { schema: { type: object, properties: { batch_id: { type: string }, status: { const: en_cola } } } } } }
-        '200': { description: Lote ya recibido con esa Idempotency-Key }
-        '401': { $ref: '#/components/responses/Error' }
-        '422': { $ref: '#/components/responses/Error' }
-  /internal/v1/ingest/batches/{id}:
-    servers: [{ url: / }]
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /cart/items/{sku}:
+    patch:
+      tags:
+      - cart
+      summary: Cambia la cantidad
+      security:
+      - bearer: []
+      description: 'Roles: cliente.'
+      parameters:
+      - $ref: '#/components/parameters/sku'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cantidad:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+              required:
+              - cantidad
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      tags:
+      - cart
+      summary: Quita un SKU
+      security:
+      - bearer: []
+      description: 'Roles: cliente.'
+      parameters:
+      - $ref: '#/components/parameters/sku'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /cart/coupon:
+    post:
+      tags:
+      - cart
+      summary: Aplica un cupón
+      description: |-
+        422 CUPON_INVALIDO o CUPON_NO_APLICA.
+
+        Roles: cliente.
+      security:
+      - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                codigo:
+                  type: string
+              required:
+              - codigo
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      tags:
+      - cart
+      summary: Quita el cupón
+      security:
+      - bearer: []
+      description: 'Roles: cliente.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /checkout:
+    post:
+      tags:
+      - checkout
+      summary: Crea pedido pendiente_pago y reserva el stock
+      description: |-
+        La reserva dura RESERVA_MINUTOS (15). Si una línea no alcanza no se reserva nada: 409 STOCK_INSUFICIENTE. También 409 CARRITO_VACIO o CARRITO_INVALIDO.
+
+        Roles: cliente.
+      security:
+      - bearer: []
+      parameters:
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                address_id:
+                  $ref: '#/components/schemas/Id'
+                notas:
+                  type: string
+                  maxLength: 500
+              required:
+              - address_id
+      responses:
+        '201':
+          description: Pedido creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /payments/{provider}/create:
+    post:
+      tags:
+      - checkout
+      summary: Inicia el pago y devuelve la URL del proveedor
+      description: |-
+        409 PEDIDO_NO_PAGABLE o RESERVA_VENCIDA. 503 PAGO_NO_DISPONIBLE si el proveedor no está configurado.
+
+        Roles: cliente.
+      security:
+      - bearer: []
+      parameters:
+      - $ref: '#/components/parameters/provider'
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                order_id:
+                  $ref: '#/components/schemas/Id'
+              required:
+              - order_id
+      responses:
+        '201':
+          description: Intento creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment_id:
+                    type: string
+                  approve_url:
+                    type: string
+                    format: uri
+                  referencia_externa:
+                    type:
+                    - string
+                    - 'null'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /payments/{provider}/capture:
+    post:
+      tags:
+      - checkout
+      summary: Confirma el pago al volver del proveedor
+      description: |-
+        Idempotente: si el webhook llegó antes responde `duplicado`. 409 PAGO_DE_OTRO_PEDIDO.
+
+        Roles: cliente.
+      security:
+      - bearer: []
+      parameters:
+      - $ref: '#/components/parameters/provider'
+      - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                order_id:
+                  $ref: '#/components/schemas/Id'
+                referencia:
+                  type: string
+                  description: 'PayPal: id de la orden. Mercado Pago: payment_id del redirect.'
+              required:
+              - order_id
+              - referencia
+      responses:
+        '200':
+          description: Resultado
+          content:
+            application/json:
+              schema: &id002
+                type: object
+                properties:
+                  resultado:
+                    enum:
+                    - aprobado
+                    - pendiente
+                    - rechazado
+                    - duplicado
+                    - requiere_reembolso
+                  order_id:
+                    type: string
+                  estado_pedido:
+                    enum: *id001
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /webhooks/{provider}:
+    post:
+      tags:
+      - checkout
+      summary: Webhook firmado del proveedor
+      description: 'Mercado Pago: x-signature HMAC con MP_WEBHOOK_SECRET. PayPal: verify-webhook-signature con PAYPAL_WEBHOOK_ID. Eventos repetidos
+        responden `duplicado`.'
+      parameters:
+      - $ref: '#/components/parameters/provider'
+      responses:
+        '200':
+          description: Procesado o duplicado
+          content:
+            application/json:
+              schema: *id002
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /orders:
     get:
-      tags: [ingest]
-      security: [{ serviceToken: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      tags:
+      - orders
+      summary: Pedidos del cliente
+      security:
+      - bearer: []
+      description: 'Roles: cliente.'
+      parameters:
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/limit'
       responses:
-        '200': { description: Estado y conteos (coincide, nuevo, conflicto, invalido) }
-        '404': { $ref: '#/components/responses/Error' }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Page'
+                - properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /orders/{id}:
+    get:
+      tags:
+      - orders
+      summary: Detalle con historial y devoluciones
+      security:
+      - bearer: []
+      description: 'Roles: cliente.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /orders/{id}/cancel:
+    post:
+      tags:
+      - orders
+      summary: Cancela (solo pendiente_pago o pagado)
+      description: |-
+        Si ya estaba pagado el pago queda requiere_reembolso.
+
+        Roles: cliente.
+      security:
+      - bearer: []
+      parameters:
+      - $ref: '#/components/parameters/id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                motivo:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /orders/{id}/returns:
+    post:
+      tags:
+      - orders
+      summary: Solicita devolución o garantía
+      description: |-
+        409 PEDIDO_NO_ENTREGADO o DEVOLUCION_DUPLICADA; 422 FUERA_DE_PLAZO, GARANTIA_VENCIDA o IMEI_NO_CORRESPONDE.
+
+        Roles: cliente.
+      security:
+      - bearer: []
+      parameters:
+      - $ref: '#/components/parameters/id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                order_item_id:
+                  $ref: '#/components/schemas/Id'
+                motivo:
+                  type: string
+                tipo:
+                  enum:
+                  - devolucion
+                  - garantia
+                cantidad:
+                  type: integer
+                  default: 1
+                imei:
+                  type: string
+              required:
+              - order_item_id
+              - motivo
+              - tipo
+      responses:
+        '201':
+          description: Creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Return'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/products:
+    get:
+      tags:
+      - admin
+      summary: Productos (incluye borradores y costos)
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/limit'
+      - name: estado
+        in: query
+        schema:
+          enum:
+          - borrador
+          - publicado
+          - archivado
+      - name: brand_id
+        in: query
+        schema:
+          $ref: '#/components/schemas/Id'
+      - name: category_id
+        in: query
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Page'
+                - properties:
+                    data:
+                      type: array
+                      items:
+                        type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - admin
+      summary: Crea producto con variantes
+      description: |-
+        409 SKU_DUPLICADO.
+
+        Roles: gerente, admin.
+      security:
+      - bearer: []
+      requestBody: &id004
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - brand_id
+              - category_id
+              - modelo
+              - variants
+              properties:
+                brand_id:
+                  $ref: '#/components/schemas/Id'
+                category_id:
+                  $ref: '#/components/schemas/Id'
+                modelo:
+                  type: string
+                descripcion:
+                  type: string
+                specs:
+                  type: object
+                condicion:
+                  enum:
+                  - nuevo
+                  - reacondicionado
+                  - usado
+                garantia_meses:
+                  type: integer
+                estado:
+                  enum:
+                  - borrador
+                  - publicado
+                  - archivado
+                variants:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                    - sku
+                    - color
+                    - almacenamiento_gb
+                    - precio
+                    properties:
+                      sku:
+                        type: string
+                      color:
+                        type: string
+                      almacenamiento_gb:
+                        type: integer
+                      ram_gb:
+                        type: integer
+                      precio: &id003
+                        $ref: '#/components/schemas/Money'
+                      precio_antes: *id003
+                      costo: *id003
+                      gtin:
+                        type: string
+      responses:
+        '201':
+          description: Creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/products/{id}:
+    get:
+      tags:
+      - admin
+      summary: Detalle de producto
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    patch:
+      tags:
+      - admin
+      summary: Edita producto (un cambio de precio queda en auditoría)
+      description: |-
+        409 PRODUCTO_SIN_VARIANTES al publicar sin variantes.
+
+        Roles: gerente, admin.
+      security:
+      - bearer: []
+      parameters:
+      - $ref: '#/components/parameters/id'
+      requestBody: *id004
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      tags:
+      - admin
+      summary: Archiva el producto
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      responses:
+        '204':
+          description: OK
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/products/{id}/variants:
+    post:
+      tags:
+      - admin
+      summary: Agrega variante
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/products/{id}/variants/{variantId}:
+    patch:
+      tags:
+      - admin
+      summary: Edita variante
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      - name: variantId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      tags:
+      - admin
+      summary: Quita variante
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      - name: variantId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/products/{id}/images:
+    post:
+      tags:
+      - admin
+      summary: Agrega imagen (url de /admin/uploads)
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                sku:
+                  type: string
+                  description: 'opcional: foto de la variante'
+              required:
+              - url
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      tags:
+      - admin
+      summary: Quita imagen por url
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      - name: url
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/brands:
+    post:
+      tags:
+      - admin
+      summary: Crea marca
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre:
+                  type: string
+                slug:
+                  type: string
+              required:
+              - nombre
+      responses:
+        '201':
+          description: Creada
+          content:
+            application/json:
+              schema:
+                type: object
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/brands/{id}:
+    patch:
+      tags:
+      - admin
+      summary: Edita marca
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      tags:
+      - admin
+      summary: Borra marca sin productos
+      description: |-
+        409 MARCA_EN_USO / CATEGORIA_EN_USO.
+
+        Roles: gerente, admin.
+      security:
+      - bearer: []
+      parameters:
+      - $ref: '#/components/parameters/id'
+      responses:
+        '204':
+          description: OK
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/categories:
+    post:
+      tags:
+      - admin
+      summary: Crea categoría
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre:
+                  type: string
+                slug:
+                  type: string
+              required:
+              - nombre
+      responses:
+        '201':
+          description: Creada
+          content:
+            application/json:
+              schema:
+                type: object
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/categories/{id}:
+    patch:
+      tags:
+      - admin
+      summary: Edita categoría
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      tags:
+      - admin
+      summary: Borra categoría sin productos
+      description: |-
+        409 MARCA_EN_USO / CATEGORIA_EN_USO.
+
+        Roles: gerente, admin.
+      security:
+      - bearer: []
+      parameters:
+      - $ref: '#/components/parameters/id'
+      responses:
+        '204':
+          description: OK
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/uploads:
+    post:
+      tags:
+      - admin
+      summary: Sube una imagen (jpg, png o webp, máx. 5 MB)
+      description: |-
+        413 ARCHIVO_DEMASIADO_GRANDE. Se guarda en S3 o en MEDIA_DIR (/media/products/...).
+
+        Roles: gerente, admin.
+      security:
+      - bearer: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: URL pública
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/modelos:
+    get:
+      tags:
+      - admin
+      summary: Busca fichas técnicas (colección modelos)
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/limit'
+      - name: q
+        in: query
+        schema:
+          type: string
+      - name: marca
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Page'
+                - properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Modelo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/modelos/{id}:
+    get:
+      tags:
+      - admin
+      summary: Ficha normalizada
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - &id005
+        name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: ObjectId o id numérico de la ficha
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Modelo'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/modelos/{id}/import:
+    post:
+      tags:
+      - admin
+      summary: Crea o amplía un producto en borrador desde la ficha
+      description: |-
+        Copia specs e imagen; el precio de la ficha (USD) no se usa. Variantes ya existentes (mismo color y GB) se omiten.
+
+        Roles: gerente, admin.
+      security:
+      - bearer: []
+      parameters:
+      - *id005
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                category_id:
+                  $ref: '#/components/schemas/Id'
+                variantes:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required:
+                    - color
+                    - almacenamiento_gb
+                    - precio
+                    properties:
+                      color:
+                        type: string
+                      almacenamiento_gb:
+                        type: integer
+                      precio: *id003
+                      sku:
+                        type: string
+              required:
+              - variantes
+      responses:
+        '201':
+          description: Producto en borrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/stock:
+    get:
+      tags:
+      - admin
+      summary: Niveles de stock con alerta de stock bajo
+      security:
+      - bearer: []
+      description: 'Roles: almacén, gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/limit'
+      - name: sku
+        in: query
+        schema:
+          type: string
+      - name: warehouse_id
+        in: query
+        schema:
+          $ref: '#/components/schemas/Id'
+      - name: bajo
+        in: query
+        schema:
+          type: boolean
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Page'
+                - properties:
+                    data:
+                      type: array
+                      items:
+                        type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/stock/movements:
+    get:
+      tags:
+      - admin
+      summary: Bitácora de movimientos
+      security:
+      - bearer: []
+      description: 'Roles: almacén, gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/limit'
+      - name: sku
+        in: query
+        schema:
+          type: string
+      - name: tipo
+        in: query
+        schema:
+          type: string
+      - $ref: '#/components/parameters/desde'
+      - $ref: '#/components/parameters/hasta'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Page'
+                - properties:
+                    data:
+                      type: array
+                      items:
+                        type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - admin
+      summary: Entrada, ajuste o traspaso
+      description: |-
+        Nunca deja stock negativo: 409 STOCK_INSUFICIENTE.
+
+        Roles: almacén, gerente, admin.
+      security:
+      - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tipo:
+                  enum:
+                  - entrada
+                  - ajuste
+                  - traspaso
+                sku:
+                  type: string
+                warehouse_id:
+                  $ref: '#/components/schemas/Id'
+                warehouse_destino_id:
+                  $ref: '#/components/schemas/Id'
+                cantidad:
+                  type: integer
+                  description: negativa solo en ajuste
+                referencia:
+                  type: string
+              required:
+              - tipo
+              - sku
+              - warehouse_id
+              - cantidad
+      responses:
+        '201':
+          description: Movimientos creados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/serials:
+    post:
+      tags:
+      - admin
+      summary: Alta de IMEI en lote (todo o nada)
+      description: |-
+        422 IMEI_INVALIDO (Luhn); 409 IMEI_DUPLICADO.
+
+        Roles: almacén, gerente, admin.
+      security:
+      - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sku:
+                  type: string
+                warehouse_id:
+                  $ref: '#/components/schemas/Id'
+                imeis:
+                  type: array
+                  items:
+                    type: string
+                    pattern: ^[0-9]{15}$
+                  maxItems: 500
+                referencia:
+                  type: string
+              required:
+              - sku
+              - warehouse_id
+              - imeis
+      responses:
+        '201':
+          description: Unidades creadas y stock sumado
+          content:
+            application/json:
+              schema:
+                type: object
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/serials/{imei}:
+    get:
+      tags:
+      - admin
+      summary: Unidad por IMEI con historial
+      security:
+      - bearer: []
+      description: 'Roles: almacén, gerente, admin.'
+      parameters:
+      - name: imei
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[0-9]{15}$
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/warehouses:
+    get:
+      tags:
+      - admin
+      summary: Almacenes
+      security:
+      - bearer: []
+      description: 'Roles: almacén, gerente, admin.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - admin
+      summary: Crea almacén
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre:
+                  type: string
+                tipo:
+                  enum:
+                  - almacen
+                  - bodega_proveedor
+                direccion:
+                  type: string
+              required:
+              - nombre
+              - tipo
+      responses:
+        '201':
+          description: Creado
+          content:
+            application/json:
+              schema:
+                type: object
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/warehouses/{id}:
+    patch:
+      tags:
+      - admin
+      summary: Edita almacén
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/orders:
+    get:
+      tags:
+      - admin
+      summary: Pedidos con filtros
+      security:
+      - bearer: []
+      description: 'Roles: almacén, gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/limit'
+      - name: estado
+        in: query
+        schema:
+          enum: *id001
+      - name: folio
+        in: query
+        schema:
+          type: string
+      - name: user_id
+        in: query
+        schema:
+          $ref: '#/components/schemas/Id'
+      - $ref: '#/components/parameters/desde'
+      - $ref: '#/components/parameters/hasta'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Page'
+                - properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/orders/{id}:
+    get:
+      tags:
+      - admin
+      summary: Detalle de pedido
+      security:
+      - bearer: []
+      description: 'Roles: almacén, gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/orders/{id}/status:
+    patch:
+      tags:
+      - admin
+      summary: Cambia el estado
+      description: |-
+        Transiciones: pendiente_pago→cancelado; pagado→preparando|cancelado; preparando→enviado|cancelado; enviado→entregado; entregado→reembolsado. Otra: 409 TRANSICION_INVALIDA. `enviado` requiere guía: 409 ENVIO_REQUERIDO. Cancelar regresa el stock.
+
+        Roles: almacén, gerente, admin.
+      security:
+      - bearer: []
+      parameters:
+      - $ref: '#/components/parameters/id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                estado:
+                  enum: *id001
+                nota:
+                  type: string
+              required:
+              - estado
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/orders/{id}/shipment:
+    post:
+      tags:
+      - admin
+      summary: Registra paquetería y guía (pasa a enviado y avisa por correo)
+      security:
+      - bearer: []
+      description: 'Roles: almacén, gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                paqueteria:
+                  type: string
+                guia:
+                  type: string
+              required:
+              - paqueteria
+              - guia
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/orders/{id}/serials:
+    post:
+      tags:
+      - admin
+      summary: Asigna IMEI escaneados a las líneas
+      description: |-
+        409 IMEI_NO_DISPONIBLE, IMEI_OTRO_ALMACEN o IMEI_COMPLETOS.
+
+        Roles: almacén, gerente, admin.
+      security:
+      - bearer: []
+      parameters:
+      - $ref: '#/components/parameters/id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                asignaciones:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      order_item_id:
+                        $ref: '#/components/schemas/Id'
+                      imei:
+                        type: string
+              required:
+              - asignaciones
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/returns:
+    get:
+      tags:
+      - admin
+      summary: Devoluciones y garantías
+      security:
+      - bearer: []
+      description: 'Roles: almacén, gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/limit'
+      - name: estado
+        in: query
+        schema:
+          type: string
+      - name: tipo
+        in: query
+        schema:
+          enum:
+          - devolucion
+          - garantia
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Page'
+                - properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Return'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/returns/{id}:
+    patch:
+      tags:
+      - admin
+      summary: Avanza la devolución
+      description: |-
+        solicitada→aprobada|rechazada→recibida→reembolsada. Al recibir regresa la pieza a stock si reintegrar_stock.
+
+        Roles: almacén, gerente, admin.
+      security:
+      - bearer: []
+      parameters:
+      - $ref: '#/components/parameters/id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                estado:
+                  enum:
+                  - aprobada
+                  - rechazada
+                  - recibida
+                  - reembolsada
+                resolucion:
+                  type: string
+                reintegrar_stock:
+                  type: boolean
+              required:
+              - estado
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Return'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/promotions:
+    get:
+      tags:
+      - admin
+      summary: Promociones y cupones
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Page'
+                - properties:
+                    data:
+                      type: array
+                      items:
+                        type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - admin
+      summary: Crea promoción o cupón
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: &id006
+              type: object
+              properties:
+                nombre:
+                  type: string
+                codigo:
+                  type:
+                  - string
+                  - 'null'
+                  description: con código es cupón
+                tipo_descuento:
+                  enum:
+                  - Porcentaje
+                  - Monto fijo
+                  - 2x1
+                  - Combo precio fijo
+                  - Lleva X paga Y
+                valor_descuento:
+                  type: number
+                cantidad_minima:
+                  type: integer
+                aplicacion:
+                  enum:
+                  - producto
+                  - total
+                dias_semana:
+                  type: string
+                  description: '"0,1" con 0 = lunes'
+                fecha_inicio:
+                  type: string
+                  format: date-time
+                fecha_fin:
+                  type: string
+                  format: date-time
+                activa:
+                  type: boolean
+                usos_maximos:
+                  type:
+                  - integer
+                  - 'null'
+                productos_aplicables:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Id'
+                productos_beneficiados:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Id'
+      responses:
+        '201':
+          description: Creada
+          content:
+            application/json:
+              schema: *id006
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/promotions/{id}:
+    patch:
+      tags:
+      - admin
+      summary: Edita promoción
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id006
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id006
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      tags:
+      - admin
+      summary: Borra promoción
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      responses:
+        '204':
+          description: OK
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/discount-types:
+    get:
+      tags:
+      - admin
+      summary: Tipos de descuento válidos
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/reports/sales:
+    get:
+      tags:
+      - admin
+      summary: Ventas por día, producto y proveedor de pago
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/desde'
+      - $ref: '#/components/parameters/hasta'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resumen:
+                    type: object
+                  filas:
+                    type: array
+                    items:
+                      type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/reports/margins:
+    get:
+      tags:
+      - admin
+      summary: Margen por SKU (precio de venta menos costo)
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/desde'
+      - $ref: '#/components/parameters/hasta'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resumen:
+                    type: object
+                  filas:
+                    type: array
+                    items:
+                      type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/reports/inventory:
+    get:
+      tags:
+      - admin
+      summary: Inventario valorizado y stock bajo
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/reports/export:
+    post:
+      tags:
+      - admin
+      summary: Exporta un reporte
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tipo:
+                  enum:
+                  - sales
+                  - inventory
+                  - margins
+                formato:
+                  enum:
+                  - xlsx
+                  - pdf
+                desde:
+                  type: string
+                  format: date-time
+                hasta:
+                  type: string
+                  format: date-time
+              required:
+              - tipo
+              - formato
+      responses:
+        '200':
+          description: Archivo
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/audit:
+    get:
+      tags:
+      - admin
+      summary: Bitácora de auditoría
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/limit'
+      - name: accion
+        in: query
+        schema:
+          type: string
+      - name: entidad
+        in: query
+        schema:
+          type: string
+      - name: entidad_id
+        in: query
+        schema:
+          type: string
+      - name: user_id
+        in: query
+        schema:
+          type: string
+      - $ref: '#/components/parameters/desde'
+      - $ref: '#/components/parameters/hasta'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Page'
+                - properties:
+                    data:
+                      type: array
+                      items:
+                        type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/settings:
+    get:
+      tags:
+      - admin
+      summary: Configuración de la tienda
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  costo_envio:
+                    type: string
+                  envio_gratis_desde:
+                    type: string
+                  stock_bajo_umbral:
+                    type: string
+                  almacen_online_id:
+                    type: string
+                  nombre_tienda:
+                    type: string
+                  dias_devolucion:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      tags:
+      - admin
+      summary: Actualiza claves conocidas
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/users:
+    get:
+      tags:
+      - admin
+      summary: Empleados
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Page'
+                - properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - admin
+      summary: Crea empleado
+      description: |-
+        Solo admin crea otros admin.
+
+        Roles: gerente, admin.
+      security:
+      - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+                nombre:
+                  type: string
+                rol:
+                  enum:
+                  - admin
+                  - gerente
+                  - almacen
+                telefono:
+                  type: string
+              required:
+              - email
+              - password
+              - nombre
+              - rol
+      responses:
+        '201':
+          description: Creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/users/{id}:
+    patch:
+      tags:
+      - admin
+      summary: Edita empleado
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/api-clients:
+    get:
+      tags:
+      - admin
+      summary: Sistemas externos con acceso a /external/v1
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApiClient'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - admin
+      summary: Crea cliente y su llave
+      description: |-
+        Contrato de la API externa: docs/external-api.yaml.
+
+        Roles: gerente, admin.
+      security:
+      - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre:
+                  type: string
+                scopes:
+                  type: array
+                  items:
+                    enum: *id007
+                limite_por_minuto:
+                  type: integer
+                  default: 60
+                vence_en:
+                  type:
+                  - string
+                  - 'null'
+                  format: date-time
+                activo:
+                  type: boolean
+              required:
+              - nombre
+              - scopes
+      responses:
+        '201':
+          description: Creado
+          content:
+            application/json:
+              schema: &id008
+                allOf:
+                - $ref: '#/components/schemas/ApiClient'
+                - properties:
+                    api_key:
+                      type: string
+                      description: ck_<prefix>_<secreto>; solo se muestra en esta respuesta
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/api-clients/{id}:
+    patch:
+      tags:
+      - admin
+      summary: Edita permisos, límite, vencimiento o activo
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre:
+                  type: string
+                scopes:
+                  type: array
+                  items:
+                    enum: *id007
+                limite_por_minuto:
+                  type: integer
+                  default: 60
+                vence_en:
+                  type:
+                  - string
+                  - 'null'
+                  format: date-time
+                activo:
+                  type: boolean
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiClient'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      tags:
+      - admin
+      summary: 'Revoca (activo: false)'
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      responses:
+        '204':
+          description: OK
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/api-clients/{id}/rotate:
+    post:
+      tags:
+      - admin
+      summary: Genera llave nueva; la anterior deja de servir
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: *id008
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/ingest/batches:
+    get:
+      tags:
+      - ingest
+      summary: Lotes recibidos
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/limit'
+      - name: source
+        in: query
+        schema:
+          type: string
+      - name: status
+        in: query
+        schema:
+          enum:
+          - en_cola
+          - procesando
+          - listo
+          - fallido
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Page'
+                - properties:
+                    data:
+                      type: array
+                      items:
+                        type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/ingest/records:
+    get:
+      tags:
+      - ingest
+      summary: Cola de revisión
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/page'
+      - $ref: '#/components/parameters/limit'
+      - name: resultado
+        in: query
+        schema:
+          enum:
+          - coincide
+          - nuevo
+          - conflicto
+          - invalido
+      - name: decision
+        in: query
+        schema:
+          enum:
+          - pendiente
+          - aprobado
+          - rechazado
+          - no_aplica
+      - name: source
+        in: query
+        schema:
+          type: string
+      - name: batch_id
+        in: query
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Page'
+                - properties:
+                    data:
+                      type: array
+                      items:
+                        type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/ingest/records/{id}/approve:
+    post:
+      tags:
+      - ingest
+      summary: Aprueba un registro
+      description: |-
+        Sin sku en un `nuevo` crea un producto en borrador. 409 REGISTRO_YA_REVISADO.
+
+        Roles: gerente, admin.
+      security:
+      - bearer: []
+      parameters:
+      - $ref: '#/components/parameters/id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sku:
+                  type: string
+                  description: liga a esta variante
+                category_id:
+                  $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/ingest/records/{id}/reject:
+    post:
+      tags:
+      - ingest
+      summary: Rechaza un registro
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - $ref: '#/components/parameters/id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nota:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/competitor-prices:
+    get:
+      tags:
+      - ingest
+      summary: Precios de la competencia de un SKU
+      security:
+      - bearer: []
+      description: 'Roles: gerente, admin.'
+      parameters:
+      - name: sku
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: source
+        in: query
+        schema:
+          type: string
+      - $ref: '#/components/parameters/desde'
+      - $ref: '#/components/parameters/hasta'
+      responses:
+        '200':
+          description: Último por fuente e histórico
+          content:
+            application/json:
+              schema:
+                type: object
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /internal/v1/ingest/batches:
+    servers:
+    - url: /
+    post:
+      tags:
+      - ingest
+      summary: Recibe un lote del scraper (solo red interna)
+      security:
+      - serviceToken: []
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./contracts/ingest-batch.schema.json
+      responses:
+        '202':
+          description: Lote en cola
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batch_id:
+                    type: string
+                  status:
+                    const: en_cola
+        '200':
+          description: Lote ya recibido con esa Idempotency-Key
+        '401':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Error'
+      description: 'Solo se valida el sobre (422 LOTE_INVALIDO). Cada registro se valida en el worker: uno mal formado queda `invalido` sin tumbar
+        el lote. Token: INGEST_API_KEY.'
+  /internal/v1/ingest/batches/{id}:
+    servers:
+    - url: /
+    get:
+      tags:
+      - ingest
+      security:
+      - serviceToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Estado y conteos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batch_id:
+                    type: string
+                  source:
+                    type: string
+                  status:
+                    enum:
+                    - en_cola
+                    - procesando
+                    - listo
+                    - fallido
+                  record_count:
+                    type: integer
+                  stats:
+                    type: object
+                    properties:
+                      coincide:
+                        type: integer
+                      nuevo:
+                        type: integer
+                      conflicto:
+                        type: integer
+                      invalido:
+                        type: integer
+                  invalidos:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        external_id:
+                          type:
+                          - string
+                          - 'null'
+                        motivo:
+                          type: string
+                  received_at:
+                    type: string
+                    format: date-time
+                  processed_at:
+                    type:
+                    - string
+                    - 'null'
+                    format: date-time
+                  error:
+                    type:
+                    - string
+                    - 'null'
+        '404':
+          $ref: '#/components/responses/Error'

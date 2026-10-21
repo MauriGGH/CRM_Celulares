@@ -1,7 +1,7 @@
 /**
  * Punto de entrada: conecta a MongoDB y arranca Express.
- * El esquema lo definen los modelos de Mongoose; los índices se crean con
- * `npm run seed` o al arrancar en desarrollo (autoIndex).
+ * Los índices se crean con `npm run migrate` al desplegar (en desarrollo
+ * también con autoIndex).
  */
 const env = require('./config/env');
 const app = require('./app');
@@ -10,7 +10,10 @@ const { connectDatabase } = require('./config/database');
 
 connectDatabase(env.mongoUri)
   .then(() => {
-    app.listen(env.port, () => logger.info(`API escuchando en el puerto ${env.port}`));
+    const server = app.listen(env.port, () => logger.info(`API escuchando en el puerto ${env.port}`));
+    const stop = () => server.close(() => process.exit(0));
+    process.on('SIGTERM', stop);
+    process.on('SIGINT', stop);
   })
   .catch((err) => {
     logger.error({ err }, 'No se pudo conectar a MongoDB');

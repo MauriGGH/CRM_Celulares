@@ -25,6 +25,7 @@ const ingestBatchSchema = new Schema(
       conflicto: { type: Number, default: 0 },
       invalido: { type: Number, default: 0 },
     },
+    processed_at: Date,
     error: String,
   },
   { collection: 'ingest_batches', timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }

@@ -29,7 +29,15 @@ se referencia lo que tiene vida propia o crece.
 | `settings` | clave, valor | clave único | |
 | `ingest_batches` | source, schema_version, scraped_at, idempotency_key, status, record_count, records (hasta procesarse), stats | idempotency_key único, status | Ya implementada en `backend/src/modules/ingest` |
 | `ingest_records` | batch_id, source, external_id, source_url, payload, resultado (`coincide`, `nuevo`, `conflicto`, `invalido`), product_id, sku, decision (`pendiente`, `aprobado`, `rechazado`), revisado_por | (resultado, decision), (source, external_id) | Cola de revisión del gerente |
-| `competitor_prices` | sku, source, precio, en_stock, captured_at | (sku, captured_at), (source, captured_at) | Histórico de precios de la competencia, solo lectura para ventas |
+| `competitor_prices` | captured_at, meta: { sku, source }, product_id, precio, en_stock, url, ingest_record_id | (meta.sku, captured_at), (meta.source, captured_at) | Histórico de precios de la competencia. Colección normal (4.4 no tiene time series) |
+| `modelos` | id (número), marca, modelo, almacenamiento ("128GB / 256GB"), memoria_ram, procesador, pantalla, medidas, bateria, camara_principal, sistema_operativo, precio ("$899 USD"), imagen, url_gsmarena | los del equipo de DB | **Del equipo de DB** (fichas de GSMArena, `infra/scripts/import-modelos.sh`). El backend solo la lee y `migrate` no toca sus índices. `POST /admin/modelos/:id/import` crea un producto en borrador |
+| `refresh_tokens` | user_id, token_hash, expires_at, revoked_at, replaced_by, user_agent | token_hash único, user_id, TTL en expires_at | Rotación en cada uso; reusar uno ya rotado revoca todas las sesiones del usuario |
+| `webhook_events` | proveedor, event_id, payload, procesado_en | (proveedor, event_id) único | Deduplica webhooks |
+| `idempotency_keys` | scope (usuario + ruta), key, request_hash, status_code, response_body | (scope, key) único, TTL 24 h | Respuestas repetibles de checkout y pagos |
+| `counters` | _id (p. ej. `orders-2026`), seq | | Folios `CEL-2026-000001` |
+| `api_clients` | nombre, prefix, key_hash, scopes, limite_por_minuto, vence_en, activo, ultimo_uso_en | prefix único | Sistemas externos de `/external/v1` (B15) |
+| `api_access_logs` | client_id, method, path, status, duracion_ms, ip, created_at | (client_id, created_at), TTL 90 días | Bitácora de la API externa |
+| `export_jobs` | client_id, resource, format, filters, status, file_id, rows, bytes, expires_at | (client_id, created_at), (status, expires_at) | Archivos en GridFS `export_files`, se borran a las 24 h |
 
 ### Transacciones
 
