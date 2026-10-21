@@ -26,7 +26,7 @@ else
 fi
 
 echo "Desplegando ${TAG} (anterior: ${PREV_TAG:-ninguno})"
-"${COMPOSE[@]}" pull api worker cloudflared
+"${COMPOSE[@]}" pull api worker
 "${COMPOSE[@]}" up -d mongo mongo-init redis
 
 # Migraciones de datos o índices, si el backend define "migrate" en package.json.

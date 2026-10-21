@@ -57,6 +57,22 @@ MongoDB 5 o superior exige ARMv8.2-A y la Pi 4 (Cortex-A72, ARMv8.0) no lo tiene
 - Los compose usan `mongosh` o `mongo` según el que traiga la imagen, así que sirven para ambas versiones.
 - `MONGO_CACHE_GB=0.5` y `MONGO_MEM_LIMIT=1500m` en una Pi de 4 GB. Con 8 GB, `1` y `2g`.
 
+## Entrada por el nginx de la Pi (configuración actual)
+
+En la Pi ya hay un nginx que recibe el túnel de Cloudflare para todas las apps. El CRM entra por ahí:
+
+```
+Cloudflare ══túnel══▶ nginx del host :80 ──▶ 127.0.0.1:8080 (Caddy del CRM) ──▶ api
+```
+
+- `infra/nginx/crm-celulares.conf`: server block para `crm-celulares`, `api-crm` e `ingest-crm` `.coliredes-paloalto.uk`.
+  Conserva el `Host` (Caddy decide por hostname qué expone) y no usa búfer en `/external/`.
+  Instalar: `sudo cp infra/nginx/crm-celulares.conf /etc/nginx/sites-available/ && sudo ln -sf /etc/nginx/sites-available/crm-celulares.conf /etc/nginx/sites-enabled/ && sudo nginx -t && sudo systemctl reload nginx`.
+- En el túnel de Cloudflare, esos tres hostnames apuntan a `http://localhost:80` (el nginx).
+- El contenedor `cloudflared` del stack queda apagado (perfil `tunnel`). Solo se usa si el CRM tuviera un túnel propio:
+  `COMPOSE_PROFILES=tunnel` y `TUNNEL_TOKEN` en `.env`.
+- Caddy escucha solo en `127.0.0.1:8080` (`HTTP_LOCAL_PORT`), así que no choca con el 80/443 del nginx.
+
 ## Despliegue rápido en la Pi de pruebas (git pull)
 
 La Pi actual (Pi 4 de 4 GB con SSD) es **temporal y solo para pruebas**. Se entra por SSH con Tailscale y el repo ya
