@@ -11,11 +11,9 @@ Código de referencia: https://github.com/MauriGGH/mochi-matcha-react (backend E
 | --- | --- |
 | Tienda y API (`/api/v1`) | `crm-celulares.coliredes-paloalto.uk` |
 | API para sistemas externos (`/external/v1`) | `api-crm.coliredes-paloalto.uk` |
-| Staging | `staging-crm.coliredes-paloalto.uk` |
-| Ingesta del scraping (`/internal/v1/ingest`) | `ingest-crm.coliredes-paloalto.uk` (con Cloudflare Access) |
-| SSH del equipo | `ssh-crm.coliredes-paloalto.uk` (con Cloudflare Access) |
+| Ingesta del scraping (`/internal/v1/ingest`) | `ingest-crm.coliredes-paloalto.uk` (Cloudflare bloquea `/internal` en los demás hosts) |
 
-En el resto del documento, `<dominio>` y sus subdominios se refieren a estos hostnames.
+La Pi es un **entorno de pruebas**: no hay staging aparte. El acceso administrativo a la Pi es por **Tailscale**, sin SSH público. En el resto del documento, `<dominio>` se refiere a estos hostnames; las menciones a `staging.<dominio>` o `ssh.<dominio>` aplican solo si más adelante hay un servidor definitivo. Plan de la zona: `/mnt/project-files/cloudflare/plan-zona.md`.
 
 **Fases:** F1 = base para que todos puedan trabajar (semana 1). F2 = flujo de compra completo. F3 = operación, reportes e integración con scraping.
 
